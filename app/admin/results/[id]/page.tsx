@@ -7,6 +7,7 @@ import { ChevronLeft, FileDown, Info, RotateCcw, TrendingUp } from "lucide-react
 import { useAuth } from "@/app/components/AuthProvider";
 import { CAMERA_INCIDENT_LABELS, CAMERA_PHOTO_RETENTION_DAYS, MAX_WARNINGS, VIOLATION_LABELS, type CameraIncidentType } from "@/lib/proctoring";
 import { markingLabel } from "@/lib/scoring";
+import { friendlyDateTime } from "@/lib/dates";
 
 const OUTCOME_COLORS = {
   correct: "#059669",
@@ -662,7 +663,7 @@ function ResultDetail() {
         <div className="flex items-end justify-between gap-4 flex-wrap mb-3">
           <div>
             <h2 className="text-lg font-bold text-gray-900">Exam Analytics</h2>
-            <p className="text-xs text-gray-500">Submitted: {new Date(attempt.submittedAt).toLocaleString("en-IN")}</p>
+            <p className="text-xs text-gray-500">Submitted: {friendlyDateTime(attempt.submittedAt)}</p>
           </div>
           <div className="text-xs text-gray-600 text-right">
             <div>Candidate: {attempt.studentName}</div>

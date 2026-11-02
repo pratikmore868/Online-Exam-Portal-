@@ -15,6 +15,7 @@ import {
   Square
 } from "lucide-react";
 import { useAuth } from "@/app/components/AuthProvider";
+import { friendlyDay } from "@/lib/dates";
 
 interface Student {
   id: string;
@@ -667,7 +668,7 @@ export default function AdminStudentsPage() {
                   <div>
                     <div className="font-semibold text-gray-800">{attempt.examTitle}</div>
                     <div className="text-gray-400 mt-0.5">
-                      Submitted on {new Date(attempt.submittedAt).toLocaleDateString("en-IN", { dateStyle: "medium" })}
+                      Submitted: {friendlyDay(attempt.submittedAt)}
                     </div>
                   </div>
                   <div className="text-right">
