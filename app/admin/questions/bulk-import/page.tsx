@@ -31,6 +31,30 @@ export default function BulkImportQuestionsPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const latestRequest = useRef(0);
+  const [previewImages, setPreviewImages] = useState<Record<string, string>>({});
+
+  // Reads the pictures straight from the chosen file, so the preview doesn't have to send them back and forth.
+  const loadPreviewImages = async (selected: File) => {
+    try {
+      const { default: JSZip } = await import("jszip");
+      const zip = await JSZip.loadAsync(selected);
+      const urls: Record<string, string> = {};
+      await Promise.all(
+        Object.values(zip.files)
+          .filter((entry) => !entry.dir && /^word\/media\/.+\.(png|jpe?g|gif)$/i.test(entry.name))
+          .map(async (entry) => {
+            urls[entry.name.replace(/^word\//, "")] = URL.createObjectURL(await entry.async("blob"));
+          })
+      );
+      setPreviewImages((previous) => {
+        Object.values(previous).forEach((url) => URL.revokeObjectURL(url));
+        return urls;
+      });
+    } catch {
+      // The server explains what's wrong with the file. The preview just keeps its placeholders.
+      setPreviewImages({});
+    }
+  };
 
   useEffect(() => {
     fetch("/api/subjects")
@@ -158,6 +182,7 @@ export default function BulkImportQuestionsPage() {
         onFile={(selected) => {
           setFile(selected);
           setResult(null);
+          loadPreviewImages(selected);
           send(selected, defaultSubject, false);
         }}
       />
@@ -176,7 +201,7 @@ export default function BulkImportQuestionsPage() {
           <h2 className="font-semibold mb-2">File format</h2>
           <ul className="list-disc ml-5 space-y-1">
             <li>Upload a .docx file of up to 4 MB, with each question in a separate table. Word equations and pictures are supported.</li>
-            <li><strong>Rows:</strong> Question, Type, Difficulty, Option or Answer, Solution, Subject, Chapters, Tags, PYQ.</li>
+            <li><strong>Rows:</strong> Question, Type, Difficulty, Option or Answer, Solution, Subject, Chapters, Tags, PYQ, and optionally Marks.</li>
             <li><strong>MCQ options:</strong> use 3 columns: Option | content | correct or incorrect, with exactly one correct option.</li>
             <li><strong>Supported types:</strong> MCQ (also written as multiple_choice or similar), true_false (Answer: true or false) and numeric (Answer: 1.2, or a range like 1.2-3.4). A question with Option rows counts as MCQ.</li>
             <li>The short_answer and essay types can&apos;t be marked automatically, so they aren&apos;t imported.</li>
@@ -250,6 +275,7 @@ export default function BulkImportQuestionsPage() {
                   {row.chapters.map((c: string) => (
                     <span key={c} className="px-2 py-0.5 rounded-md border text-gray-700 bg-gray-50 border-gray-200">{c}</span>
                   ))}
+                  {row.marks && <span className="px-2 py-0.5 rounded-md border text-gray-700 bg-gray-50 border-gray-200">{row.marks} mark{row.marks === 1 ? "" : "s"}</span>}
                   {row.pyq && <span className="px-2 py-0.5 rounded-md border text-purple-800 bg-purple-50 border-purple-200">PYQ: {row.pyq.exam}{row.pyq.year ? ` ${row.pyq.year}` : ""}</span>}
                   {row.errors.length === 0 && !row.duplicate && !row.subject && (
                     <span className="px-2 py-0.5 rounded-md border text-amber-800 bg-amber-50 border-amber-200">Needs a subject</span>
@@ -259,7 +285,7 @@ export default function BulkImportQuestionsPage() {
                   )}
                 </div>
 
-                <div className="text-sm text-gray-900 font-medium"><MathText text={row.text} /></div>
+                <div className="text-sm text-gray-900 font-medium"><MathText text={row.text} previewImages={previewImages} /></div>
 
                 {row.options.length > 0 && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5 mt-3">
@@ -271,7 +297,7 @@ export default function BulkImportQuestionsPage() {
                         }`}
                       >
                         <span className="font-bold text-[10px] text-gray-500 mt-px">{String.fromCharCode(65 + i)}.</span>
-                        <span className="flex-1"><MathText text={option} /></span>
+                        <span className="flex-1"><MathText text={option} previewImages={previewImages} /></span>
                         {row.correctAnswer === i && <span className="text-[10px] font-bold text-emerald-800 whitespace-nowrap">✓ Correct</span>}
                       </div>
                     ))}
@@ -280,7 +306,7 @@ export default function BulkImportQuestionsPage() {
 
                 {answerText(row) && <p className="text-xs font-semibold text-emerald-800 mt-2">{answerText(row)}</p>}
                 {row.solution && (
-                  <p className="text-xs text-gray-600 mt-2"><strong>Solution:</strong> <MathText text={row.solution} /></p>
+                  <p className="text-xs text-gray-600 mt-2"><strong>Solution:</strong> <MathText text={row.solution} previewImages={previewImages} /></p>
                 )}
 
                 {row.errors.length > 0 && (

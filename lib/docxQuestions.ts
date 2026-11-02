@@ -1,5 +1,6 @@
 // Reads the question bank Word format: one table per question (see public/samples/BulkImportSample.docx).
 // Uploaded files are untrusted, so sizes are limited before anything is unpacked.
+import { createHash } from "node:crypto";
 import { DOMParser } from "@xmldom/xmldom";
 import JSZip from "jszip";
 
@@ -22,6 +23,7 @@ export interface ParsedQuestion {
   chapters: string[];
   tags: string[];
   pyq: { exam: string; year?: number } | null;
+  marks?: number;
   images: string[];
   errors: string[];
 }
@@ -164,11 +166,14 @@ function inline(node: any, rels: Map<string, string>, images: Set<string>): stri
         break;
       case "w:drawing":
       case "w:pict": {
+        // The size the picture is shown at in Word, which keeps it in proportion to the text.
+        const emu = Number(findExtent(c));
+        const width = emu > 0 ? `|${Math.round(emu / 9525)}` : "";
         for (const embed of findEmbeds(c)) {
           const target = rels.get(embed);
           if (target) {
             images.add(target);
-            out += `[[img:${target}]]`;
+            out += `[[img:${target}${width}]]`;
           }
         }
         break;
@@ -178,6 +183,15 @@ function inline(node: any, rels: Map<string, string>, images: Set<string>): stri
     }
   }
   return out;
+}
+
+function findExtent(node: any): string | null {
+  for (const c of childElements(node)) {
+    if (c.nodeName === "wp:extent") return c.getAttribute("cx");
+    const found = findExtent(c);
+    if (found) return found;
+  }
+  return null;
 }
 
 function findEmbeds(node: any): string[] {
@@ -269,6 +283,13 @@ function parseTable(table: any, index: number, rels: Map<string, string>): Parse
     errors,
   };
 
+  const rawMarks = (fields.marks ?? fields.mark ?? "").trim();
+  if (rawMarks) {
+    const marks = Number(rawMarks);
+    if (Number.isFinite(marks) && marks > 0 && marks <= 100) question.marks = marks;
+    else errors.push(`Marks must be a number above 0, not "${rawMarks}".`);
+  }
+
   const pyq = splitList(fields.pyq ?? "");
   if (pyq.length > 0) {
     const last = pyq[pyq.length - 1];
@@ -323,6 +344,23 @@ function parseXml(xml: string) {
   // Word files have no need for one, and it's how XML entity attacks work.
   if (/<!DOCTYPE/i.test(xml)) throw new Error("Unexpected content in this file.");
   return new DOMParser().parseFromString(xml, "text/xml");
+}
+
+// Identifies a question's content, so the same question uploaded twice isn't stored twice.
+// Pictures count by what they show, or every picture-only question would look identical.
+export function questionFingerprint(question: ParsedQuestion, images: Map<string, ParsedImage>) {
+  const normalize = (value: string) =>
+    value
+      .replace(/\[\[img:([^\]|]*)(?:\|\d+)?\]\]/g, (_match, path) => {
+        const image = images.get(path);
+        return image ? `[img:${createHash("sha256").update(image.data).digest("hex")}]` : "[img]";
+      })
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+  return createHash("sha256")
+    .update(JSON.stringify([question.type, normalize(question.text), question.options.map(normalize)]))
+    .digest("hex");
 }
 
 export class ImportFileError extends Error {}

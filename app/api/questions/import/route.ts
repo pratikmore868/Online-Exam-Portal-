@@ -1,18 +1,10 @@
 import { NextResponse } from "next/server";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { getDatabase } from "@/lib/mongodb";
 import { ApiError, handleApiError, requireStaff } from "@/lib/api";
-import { ImportFileError, MAX_IMPORT_BYTES, parseQuestionDocx, type ParsedQuestion } from "@/lib/docxQuestions";
+import { ImportFileError, MAX_IMPORT_BYTES, parseQuestionDocx, questionFingerprint } from "@/lib/docxQuestions";
 import { computeTotalMarks, findExam, getMarking } from "@/lib/exams";
 import { normalizeSections, placeQuestion, sectionsForEditing } from "@/lib/sections";
-
-// The same question uploaded twice has the same fingerprint, so it isn't stored twice.
-function fingerprint(q: ParsedQuestion) {
-  const normalize = (value: string) => value.replace(/\[\[img:[^\]]*\]\]/g, "[img]").replace(/\s+/g, " ").trim().toLowerCase();
-  return createHash("sha256")
-    .update(JSON.stringify([q.type, normalize(q.text), q.options.map(normalize)]))
-    .digest("hex");
-}
 
 // Sends the file twice: first to preview what's in it, then with confirm to save it.
 export async function POST(req: Request) {
@@ -49,7 +41,7 @@ export async function POST(req: Request) {
     const subjects = await db.collection("subjects").find({}, { projection: { id: 1, name: 1 } }).toArray();
     const canonical = (name: string) => subjects.find((s) => s.name.toLowerCase() === name.toLowerCase())?.name ?? name;
 
-    const hashes = questions.map(fingerprint);
+    const hashes = questions.map((q) => questionFingerprint(q, images));
     const existing = new Set(
       (await db.collection("questions").distinct("contentHash", { contentHash: { $in: hashes } })) as string[]
     );
@@ -108,7 +100,8 @@ export async function POST(req: Request) {
         }))
       );
     }
-    const withImages = (value: string) => value.replace(/\[\[img:([^\]]+)\]\]/g, (_m, path) => `[[img:${imageIds.get(path)}]]`);
+    const withImages = (value: string) =>
+      value.replace(/\[\[img:([^\]|]+)(\|\d+)?\]\]/g, (_m, path, width) => `[[img:${imageIds.get(path)}${width ?? ""}]]`);
 
     const now = new Date();
     const docs = toImport.map((row) => ({
@@ -125,7 +118,8 @@ export async function POST(req: Request) {
       tags: row.tags,
       pyq: row.pyq,
       solution: withImages(row.solution),
-      marks: row.subject === "Mathematics" ? 2 : 1,
+      // The file's Marks row if there is one, otherwise the usual default.
+      marks: row.marks ?? (row.subject === "Mathematics" ? 2 : 1),
       contentHash: row.hash,
       source: "bulk-import",
       createdAt: now,

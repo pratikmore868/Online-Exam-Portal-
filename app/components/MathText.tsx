@@ -3,11 +3,21 @@ import React, { useMemo } from "react";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 
-const TOKEN = /\\\$|\$([^$\n]+)\$|\[\[img:([^\]\n]+)\]\]/g;
+const TOKEN = /\\\$|\$([^$\n]+)\$|\[\[img:([^\]\n|]+)(?:\|(\d+))?\]\]/g;
 const UUID = /^[0-9a-f-]{36}$/i;
 
+// Sits in line with text, at the size it had in Word when that's known, and never wider than the page.
+const imageStyle = (width?: string): React.CSSProperties => ({
+  display: "inline-block",
+  verticalAlign: "middle",
+  maxWidth: "100%",
+  height: "auto",
+  margin: "2px",
+  ...(width ? { width: Number(width) } : { maxHeight: 320 }),
+});
+
 // Shows question text with $...$ as equations and [[img:id]] as pictures. Everything else stays plain text.
-export default function MathText({ text }: { text?: string | null }) {
+export default function MathText({ text, previewImages }: { text?: string | null; previewImages?: Record<string, string> }) {
   const parts = useMemo(() => {
     const value = text ?? "";
     const out: React.ReactNode[] = [];
@@ -31,17 +41,22 @@ export default function MathText({ text }: { text?: string | null }) {
         out.push(
           // Served from an authenticated API route, which next/image can't optimise.
           // eslint-disable-next-line @next/next/no-img-element
-          <img key={key} src={`/api/question-images/${match[2]}`} alt="Question figure" style={{ display: "block", maxWidth: "100%", maxHeight: 320, margin: "8px 0" }} />
+          <img key={key} src={`/api/question-images/${match[2]}`} alt="Question figure" style={imageStyle(match[3])} />
+        );
+      } else if (previewImages?.[match[2]]) {
+        // In the import preview, the picture hasn't been saved yet, so it's read from the chosen file.
+        out.push(
+          // eslint-disable-next-line @next/next/no-img-element
+          <img key={key} src={previewImages[match[2]]} alt="Question figure" style={imageStyle(match[3])} />
         );
       } else {
-        // In the import preview, the picture hasn't been saved yet.
         out.push(<span key={key} style={{ fontStyle: "italic", color: "#6b7280" }}>[picture]</span>);
       }
       last = match.index + match[0].length;
     }
     if (last < value.length) out.push(value.slice(last));
     return out;
-  }, [text]);
+  }, [text, previewImages]);
 
   return <span style={{ whiteSpace: "pre-wrap" }}>{parts}</span>;
 }

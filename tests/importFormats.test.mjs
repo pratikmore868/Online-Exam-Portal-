@@ -6,7 +6,7 @@ import { parseCsv, parseStudentCsv } from "../lib/studentImport.ts";
 import { answerOutcome, questionProblem, scoreAttempt } from "../lib/scoring.ts";
 
 // lib/docxQuestions.ts imports only packages, so it can run directly.
-const { ImportFileError, parseNumericAnswer, parseQuestionDocx } = await import("../lib/docxQuestions.ts");
+const { ImportFileError, parseNumericAnswer, parseQuestionDocx, questionFingerprint } = await import("../lib/docxQuestions.ts");
 
 const NS = `xmlns:w="w" xmlns:m="m" xmlns:r="r" xmlns:a="a"`;
 const cell = (text) => `<w:tc><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:tc>`;
@@ -36,7 +36,7 @@ test("reads every question in the real sample file", async () => {
   assert.match(first.text, /\$[^$]+\$/, "equations in the question become math");
   assert.match(first.options[0], /^\$.+\$$/, "an equation-only option becomes math");
   assert.match(first.options[0], /wedge|vee|sim|rightarrow/);
-  assert.match(first.solution, /\[\[img:media\/image1\.jpeg\]\]/, "the picture in the solution is kept");
+  assert.match(first.solution, /\[\[img:media\/image1\.jpeg\|\d+\]\]/, "the picture in the solution is kept, with its size");
   assert.equal(images.get("media/image1.jpeg").contentType, "image/jpeg");
 
   assert.deepEqual(second.options, ["True", "False"]);
@@ -119,6 +119,72 @@ test("guessing stops where a wrong guess would matter", async () => {
   // A stated true/false type keeps using its Answer row, even with stray option rows.
   const trueFalse = await parseQuestionDocx(await docx(table(row("Question", "Q"), row("Type", "true_false"), row("Answer", "true"), row("Option", "A", "incorrect"))));
   assert.equal(trueFalse.questions[0].correctAnswer, 0);
+});
+
+// A question whose text and options are only pictures, like a paper exported as images.
+const PNG = (seed) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from(seed)]);
+async function pictureDocx(questions) {
+  const zip = new JSZip();
+  const rels = [];
+  let id = 0;
+  const picture = (seed) => {
+    id += 1;
+    rels.push(`<Relationship Id="rId${id}" Target="media/${id}.png"/>`);
+    zip.file(`word/media/${id}.png`, PNG(seed));
+    return `<w:tc><w:p><w:r><w:drawing><a:blip r:embed="rId${id}"/></w:drawing></w:r></w:p></w:tc>`;
+  };
+  const tables = questions.map(
+    (q) => `<w:tbl><w:tr>${cell("Question")}${picture(q.text)}</w:tr>${row("Type", "multiple_choice")}<w:tr>${cell("Option")}${picture(q.a)}${cell("correct")}</w:tr><w:tr>${cell("Option")}${picture(q.b)}${cell("incorrect")}</w:tr>${q.marks ? row("Marks", q.marks) : ""}</w:tbl>`
+  );
+  zip.file("word/document.xml", `<w:document ${NS}><w:body>${tables.join("")}</w:body></w:document>`);
+  zip.file("word/_rels/document.xml.rels", `<Relationships>${rels.join("")}</Relationships>`);
+  return zip.generateAsync({ type: "nodebuffer" });
+}
+const prints = async (questions) => {
+  const { questions: parsed, images } = await parseQuestionDocx(await pictureDocx(questions));
+  return parsed.map((q) => questionFingerprint(q, images));
+};
+
+test("different picture-only questions aren't duplicates", async () => {
+  const [one, two] = await prints([{ text: "q1", a: "a1", b: "b1" }, { text: "q2", a: "a2", b: "b2" }]);
+  assert.notEqual(one, two);
+});
+
+test("the same picture question is a duplicate, however the file names it", async () => {
+  const [one, two] = await prints([{ text: "q", a: "a", b: "b" }, { text: "q", a: "a", b: "b" }]);
+  assert.equal(one, two);
+});
+
+test("one different option picture makes a different question", async () => {
+  const [one, two] = await prints([{ text: "q", a: "a", b: "b" }, { text: "q", a: "a", b: "other" }]);
+  assert.notEqual(one, two);
+});
+
+test("text questions are still matched ignoring case and spacing", async () => {
+  const { questions, images } = await parseQuestionDocx(await docx(
+    table(row("Question", "Hello  World"), row("Type", "numeric"), row("Answer", "1")),
+    table(row("Question", "hello world"), row("Type", "numeric"), row("Answer", "1"))
+  ));
+  assert.equal(questionFingerprint(questions[0], images), questionFingerprint(questions[1], images));
+});
+
+test("a picture's display size doesn't affect duplicate detection", async () => {
+  const q = { type: "MCQ", options: [], text: "[[img:a.png|100]]" };
+  const images = new Map([["a.png", { contentType: "image/png", data: Buffer.from("x") }]]);
+  assert.equal(questionFingerprint(q, images), questionFingerprint({ ...q, text: "[[img:a.png|300]]" }, images));
+  assert.equal(questionFingerprint(q, images), questionFingerprint({ ...q, text: "[[img:a.png]]" }, images));
+});
+
+test("the Marks row is read, and a bad one is explained", async () => {
+  const good = await parseQuestionDocx(await pictureDocx([{ text: "q", a: "a", b: "b", marks: "2.5" }]));
+  assert.equal(good.questions[0].marks, 2.5);
+  assert.deepEqual(good.questions[0].errors, []);
+  const none = await parseQuestionDocx(await pictureDocx([{ text: "q", a: "a", b: "b" }]));
+  assert.equal(none.questions[0].marks, undefined);
+  for (const bad of ["two", "0", "-1", "101"]) {
+    const { questions } = await parseQuestionDocx(await pictureDocx([{ text: "q", a: "a", b: "b", marks: bad }]));
+    assert.ok(questions[0].errors.some((e) => /Marks must be/.test(e)), `Marks "${bad}"`);
+  }
 });
 
 test("a table that isn't a question is ignored", async () => {
