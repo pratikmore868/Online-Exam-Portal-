@@ -57,19 +57,19 @@ export async function POST(req: Request) {
     const seen = new Set<string>();
     const rows = questions.map((q, i) => {
       const subject = q.subject ? canonical(q.subject) : fallbackSubject ? canonical(fallbackSubject) : null;
-      const errors = [...q.errors];
-      if (!subject) errors.push("The Subject row is empty. Fill it in, or choose a subject for blank rows.");
       const duplicate = existing.has(hashes[i]) || seen.has(hashes[i]);
       seen.add(hashes[i]);
-      return { ...q, subject, errors, duplicate, hash: hashes[i] };
+      return { ...q, subject, errors: q.errors, duplicate, hash: hashes[i] };
     });
-    const toImport = rows.filter((r) => r.errors.length === 0 && !r.duplicate);
+    // A blank subject isn't a fault in the file: the subject chosen on the page fills it in.
+    const toImport = rows.filter((r) => r.errors.length === 0 && !r.duplicate && r.subject);
 
     const summary = {
       total: rows.length,
       valid: toImport.length,
       invalid: rows.filter((r) => r.errors.length > 0).length,
       duplicates: rows.filter((r) => r.errors.length === 0 && r.duplicate).length,
+      needsSubject: rows.filter((r) => r.errors.length === 0 && !r.duplicate && !r.subject).length,
     };
 
     if (!confirm) {

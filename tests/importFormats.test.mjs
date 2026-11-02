@@ -78,6 +78,49 @@ test("labels and types ignore case, and a valid question has no errors", async (
   assert.equal(questions[0].correctAnswer, 0);
 });
 
+test("every way of writing MCQ means the same thing", async () => {
+  for (const type of ["MCQ", "mcq", " Mcq ", "multiple_choice", "Multiple Choice", "multiple-choice", "MULTIPLE_CHOICE", "multichoice", "Single Correct", "objective", "anything else", ""]) {
+    const { questions } = await parseQuestionDocx(await docx(table(row("Question", "Q"), row("Type", type), row("Option", "A", "incorrect"), row("Option", "B", "correct"))));
+    assert.equal(questions[0].type, "MCQ", `Type "${type}"`);
+    assert.deepEqual(questions[0].errors, [], `Type "${type}"`);
+    assert.equal(questions[0].correctAnswer, 1, `Type "${type}"`);
+  }
+});
+
+test("a missing Type row with options is still an MCQ", async () => {
+  const { questions } = await parseQuestionDocx(await docx(table(row("Question", "Q"), row("Option", "A", "correct"), row("Option", "B", "incorrect"))));
+  assert.equal(questions[0].type, "MCQ");
+  assert.deepEqual(questions[0].errors, []);
+});
+
+test("other types have aliases too", async () => {
+  for (const type of ["true_false", "True/False", "True False", "T/F", "boolean"]) {
+    const { questions } = await parseQuestionDocx(await docx(table(row("Question", "Q"), row("Type", type), row("Answer", "false"))));
+    assert.equal(questions[0].type, "true_false", `Type "${type}"`);
+    assert.equal(questions[0].correctAnswer, 1, `Type "${type}"`);
+  }
+  for (const type of ["numeric", "Numerical", "number", "Integer", "NAT"]) {
+    const { questions } = await parseQuestionDocx(await docx(table(row("Question", "Q"), row("Type", type), row("Answer", "5"))));
+    assert.equal(questions[0].type, "numeric", `Type "${type}"`);
+    assert.deepEqual(questions[0].answerRange, { min: 5, max: 5 }, `Type "${type}"`);
+  }
+});
+
+test("guessing stops where a wrong guess would matter", async () => {
+  // An unknown type with no options can't be marked.
+  const unknown = await parseQuestionDocx(await docx(table(row("Question", "Q"), row("Type", "nonsense"))));
+  assert.ok(unknown.questions[0].errors.some((e) => /Type must be/.test(e)));
+  // Two correct options are refused even when written as an MCQ another way.
+  const twoCorrect = await parseQuestionDocx(await docx(table(row("Question", "Q"), row("Type", "multiple_choice"), row("Option", "A", "correct"), row("Option", "B", "correct"))));
+  assert.ok(twoCorrect.questions[0].errors.some((e) => /more than one correct/.test(e)));
+  // An explicit essay stays refused, even with a stray option row.
+  const essay = await parseQuestionDocx(await docx(table(row("Question", "Q"), row("Type", "Essay"), row("Option", "A", "correct"), row("Option", "B", "incorrect"))));
+  assert.ok(essay.questions[0].errors.some((e) => /can't be marked automatically/.test(e)));
+  // A stated true/false type keeps using its Answer row, even with stray option rows.
+  const trueFalse = await parseQuestionDocx(await docx(table(row("Question", "Q"), row("Type", "true_false"), row("Answer", "true"), row("Option", "A", "incorrect"))));
+  assert.equal(trueFalse.questions[0].correctAnswer, 0);
+});
+
 test("a table that isn't a question is ignored", async () => {
   const { questions } = await parseQuestionDocx(await docx(table(row("Note", "ignore me")), mcq()));
   assert.equal(questions.length, 1);

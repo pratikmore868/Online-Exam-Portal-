@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronLeft, Download } from "lucide-react";
 import FileDropZone from "@/app/admin/components/FileDropZone";
@@ -30,6 +30,7 @@ export default function BulkImportQuestionsPage() {
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const latestRequest = useRef(0);
 
   useEffect(() => {
     fetch("/api/subjects")
@@ -48,6 +49,7 @@ export default function BulkImportQuestionsPage() {
   }, []);
 
   const send = async (selected: File, subject: string, confirm: boolean) => {
+    const requestId = ++latestRequest.current;
     setBusy(true);
     setError("");
     try {
@@ -60,6 +62,8 @@ export default function BulkImportQuestionsPage() {
       }
       const res = await fetch("/api/questions/import", { method: "POST", body: form });
       const data = await res.json().catch(() => null);
+      // A slower, older preview must not replace the result of a newer choice.
+      if (requestId !== latestRequest.current) return;
       if (!data?.success) {
         setError(data?.error || (res.status === 413 ? "This file is too large. Please split it into smaller files." : "Could not read this file."));
         if (!confirm) setPreview(null);
@@ -73,9 +77,9 @@ export default function BulkImportQuestionsPage() {
         setPreview(data);
       }
     } catch {
-      setError("Could not reach the server. Please check your connection and try again.");
+      if (requestId === latestRequest.current) setError("Could not reach the server. Please check your connection and try again.");
     } finally {
-      setBusy(false);
+      if (requestId === latestRequest.current) setBusy(false);
     }
   };
 
@@ -124,6 +128,29 @@ export default function BulkImportQuestionsPage() {
         </div>
       )}
 
+      <div className="bg-white rounded-xl border border-gray-200 p-5">
+        <label htmlFor="default-subject" className="block text-sm font-medium text-gray-700 mb-1.5">
+          Subject for these questions (used when a question&apos;s Subject row is blank)
+        </label>
+        <div className="relative md:max-w-md">
+          <select
+            id="default-subject"
+            value={defaultSubject}
+            onChange={(e) => {
+              setDefaultSubject(e.target.value);
+              if (file) send(file, e.target.value, false);
+            }}
+            className={selectClass}
+          >
+            <option value="">Choose a subject...</option>
+            {subjects.map((s) => (
+              <option key={s.id} value={s.name}>{s.name}</option>
+            ))}
+          </select>
+          <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+        </div>
+      </div>
+
       <FileDropZone
         accept=".docx"
         label="DOCX"
@@ -151,7 +178,7 @@ export default function BulkImportQuestionsPage() {
             <li>Upload a .docx file of up to 4 MB, with each question in a separate table. Word equations and pictures are supported.</li>
             <li><strong>Rows:</strong> Question, Type, Difficulty, Option or Answer, Solution, Subject, Chapters, Tags, PYQ.</li>
             <li><strong>MCQ options:</strong> use 3 columns: Option | content | correct or incorrect, with exactly one correct option.</li>
-            <li><strong>Supported types:</strong> MCQ, true_false (Answer: true or false) and numeric (Answer: 1.2, or a range like 1.2-3.4).</li>
+            <li><strong>Supported types:</strong> MCQ (also written as multiple_choice or similar), true_false (Answer: true or false) and numeric (Answer: 1.2, or a range like 1.2-3.4). A question with Option rows counts as MCQ.</li>
             <li>The short_answer and essay types can&apos;t be marked automatically, so they aren&apos;t imported.</li>
             <li>Chapters and Tags can be comma separated. PYQ is written as: Exam Name,2022.</li>
             <li>Download the <a href="/samples/BulkImportSample.docx" download className="font-semibold text-[#287FC1] underline">sample file</a> for the exact format.</li>
@@ -175,40 +202,24 @@ export default function BulkImportQuestionsPage() {
             ))}
           </div>
 
-          <div className="bg-white rounded-xl border border-gray-200 p-5 grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-            <div>
-              <label htmlFor="default-subject" className="block text-sm font-medium text-gray-700 mb-1.5">Subject for questions with a blank Subject row</label>
-              <div className="relative">
-                <select
-                  id="default-subject"
-                  value={defaultSubject}
-                  onChange={(e) => {
-                    setDefaultSubject(e.target.value);
-                    send(file, e.target.value, false);
-                  }}
-                  className={selectClass}
-                >
-                  <option value="">Choose a subject...</option>
-                  {subjects.map((s) => (
-                    <option key={s.id} value={s.name}>{s.name}</option>
-                  ))}
-                </select>
-                <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              </div>
-            </div>
-            <div>
-              <label htmlFor="add-to-exam" className="block text-sm font-medium text-gray-700 mb-1.5">Also add these questions to a paper (optional)</label>
-              <div className="relative">
-                <select id="add-to-exam" value={examId} onChange={(e) => setExamId(e.target.value)} className={selectClass}>
-                  <option value="">Question bank only</option>
-                  {exams.map((e) => (
-                    <option key={e.id} value={e.id}>{e.title}</option>
-                  ))}
-                </select>
-                <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <label htmlFor="add-to-exam" className="block text-sm font-medium text-gray-700 mb-1.5">Also add these questions to a paper (optional)</label>
+            <div className="relative md:max-w-md">
+              <select id="add-to-exam" value={examId} onChange={(e) => setExamId(e.target.value)} className={selectClass}>
+                <option value="">Question bank only</option>
+                {exams.map((e) => (
+                  <option key={e.id} value={e.id}>{e.title}</option>
+                ))}
+              </select>
+              <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
           </div>
+
+          {preview.needsSubject > 0 && (
+            <div role="status" className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-sm text-amber-900">
+              {preview.needsSubject} question{preview.needsSubject === 1 ? " has" : "s have"} no subject in the file. Choose a subject at the top of this page to include {preview.needsSubject === 1 ? "it" : "them"}.
+            </div>
+          )}
 
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <p className="text-sm text-gray-600">
@@ -228,7 +239,7 @@ export default function BulkImportQuestionsPage() {
               <article
                 key={row.table}
                 className={`bg-white p-5 rounded-xl border ${
-                  row.errors.length > 0 ? "border-red-300" : row.duplicate ? "border-amber-300" : "border-gray-200"
+                  row.errors.length > 0 ? "border-red-300" : row.duplicate || !row.subject ? "border-amber-300" : "border-gray-200"
                 }`}
               >
                 <div className="flex items-center gap-2 flex-wrap text-[11px] font-medium mb-2">
@@ -240,6 +251,9 @@ export default function BulkImportQuestionsPage() {
                     <span key={c} className="px-2 py-0.5 rounded-md border text-gray-700 bg-gray-50 border-gray-200">{c}</span>
                   ))}
                   {row.pyq && <span className="px-2 py-0.5 rounded-md border text-purple-800 bg-purple-50 border-purple-200">PYQ: {row.pyq.exam}{row.pyq.year ? ` ${row.pyq.year}` : ""}</span>}
+                  {row.errors.length === 0 && !row.duplicate && !row.subject && (
+                    <span className="px-2 py-0.5 rounded-md border text-amber-800 bg-amber-50 border-amber-200">Needs a subject</span>
+                  )}
                   {row.errors.length === 0 && row.duplicate && (
                     <span className="px-2 py-0.5 rounded-md border text-amber-800 bg-amber-50 border-amber-200">Already in the bank, will be skipped</span>
                   )}

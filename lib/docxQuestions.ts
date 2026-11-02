@@ -209,6 +209,21 @@ export function parseNumericAnswer(value: string): { min: number; max: number } 
   return min <= max ? { min, max } : null;
 }
 
+const TYPE_ALIASES: Record<string, string> = {
+  mcq: "mcq", mcqs: "mcq", multiple_choice: "mcq", multiplechoice: "mcq", multi_choice: "mcq", multichoice: "mcq",
+  multiple_choice_question: "mcq", single_choice: "mcq", single_correct: "mcq", single_select: "mcq", objective: "mcq",
+  true_false: "true_false", truefalse: "true_false", true_or_false: "true_false", t_f: "true_false", tf: "true_false", boolean: "true_false",
+  numeric: "numeric", numerical: "numeric", number: "numeric", integer: "numeric", nat: "numeric",
+  short_answer: "short_answer", shortanswer: "short_answer", essay: "essay", long_answer: "essay", subjective: "essay",
+};
+
+// Staff write the same type many ways, like "MCQ", "Multiple Choice" or "multiple-choice".
+export function normalizeQuestionType(raw: string, hasOptions: boolean): string {
+  const key = raw.trim().toLowerCase().replace(/[\s\-/]+/g, "_");
+  // Option rows marked correct or incorrect can only be a choice question, whatever the Type row says.
+  return TYPE_ALIASES[key] ?? (hasOptions ? "mcq" : key);
+}
+
 function parseTable(table: any, index: number, rels: Map<string, string>): ParsedQuestion | null {
   const images = new Set<string>();
   const fields: Record<string, string> = {};
@@ -231,7 +246,7 @@ function parseTable(table: any, index: number, rels: Map<string, string>): Parse
   if (fields.question === undefined && fields.type === undefined) return null;
 
   const errors: string[] = [];
-  const rawType = (fields.type ?? "").trim().toLowerCase();
+  const rawType = normalizeQuestionType(fields.type ?? "", seenOptions.length > 0);
   const text = (fields.question ?? "").trim();
   if (!text) errors.push("The Question row is empty.");
 
