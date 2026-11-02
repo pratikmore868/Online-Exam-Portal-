@@ -4,6 +4,7 @@ import React, { Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ChevronDown, ChevronLeft, FileText, RotateCw, Search, X } from "lucide-react";
+import MathText from "@/app/components/MathText";
 
 const PAGE_SIZE = 20;
 
@@ -200,7 +201,7 @@ function SubjectQuestions() {
             <article key={q.id} className="bg-white p-5 rounded-xl border border-gray-200/90 shadow-xs">
               <div className="flex items-baseline gap-2">
                 <span className="text-sm font-bold text-gray-900">{firstNumber + i}.</span>
-                <p className="text-sm text-gray-900 leading-relaxed font-medium whitespace-pre-wrap">{q.text}</p>
+                <p className="text-sm text-gray-900 leading-relaxed font-medium whitespace-pre-wrap"><MathText text={q.text} /></p>
               </div>
 
               {q.options?.length > 0 && (
@@ -217,7 +218,7 @@ function SubjectQuestions() {
                         }`}
                       >
                         <span className="font-bold text-[10px] text-gray-500 mt-px">{String.fromCharCode(65 + index)}.</span>
-                        <span className="flex-1">{option}</span>
+                        <span className="flex-1"><MathText text={option} /></span>
                         {isCorrect && <span className="text-[10px] font-bold text-emerald-800 whitespace-nowrap">✓ Correct</span>}
                       </div>
                     );
@@ -225,10 +226,23 @@ function SubjectQuestions() {
                 </div>
               )}
 
+              {q.type === "numeric" && q.answerRange && (
+                <p className="text-xs font-semibold text-emerald-800 mt-3 ml-5">
+                  ✓ Answer: {q.answerRange.min === q.answerRange.max ? q.answerRange.min : `${q.answerRange.min} to ${q.answerRange.max}`}
+                </p>
+              )}
+
+              {q.solution && (
+                <p className="text-xs text-gray-600 mt-3 ml-5"><strong>Solution:</strong> <MathText text={q.solution} /></p>
+              )}
+
               <div className="flex items-center gap-2 flex-wrap mt-3 ml-5 text-[11px] font-medium">
-                {q.chapter && (
-                  <span className="px-2 py-0.5 rounded-md border text-emerald-800 bg-emerald-50 border-emerald-200">{q.chapter}</span>
+                {q.type && q.type !== "MCQ" && (
+                  <span className="px-2 py-0.5 rounded-md border text-sky-700 bg-sky-50 border-sky-200">{q.type === "numeric" ? "Numeric" : "True / False"}</span>
                 )}
+                {(q.chapters?.length > 0 ? q.chapters : q.chapter ? [q.chapter] : []).map((name: string) => (
+                  <span key={name} className="px-2 py-0.5 rounded-md border text-emerald-800 bg-emerald-50 border-emerald-200">{name}</span>
+                ))}
                 {q.difficulty && (
                   <span
                     className={`px-2 py-0.5 rounded-md border ${

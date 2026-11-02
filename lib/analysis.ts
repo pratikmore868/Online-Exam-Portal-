@@ -1,5 +1,5 @@
 // Pure result analysis with no server dependencies, so it can be unit tested directly.
-import { marksFor, scoreAttempt, type Marking, type ScorableQuestion } from "./scoring.ts";
+import { answerOutcome, marksFor, scoreAttempt, type Marking, type ScorableQuestion } from "./scoring.ts";
 
 export interface AnalysisQuestion extends ScorableQuestion {
   text?: string;
@@ -90,13 +90,6 @@ function buildGroups(
   });
 }
 
-function outcomeOf(question: AnalysisQuestion, choice: unknown): Outcome {
-  const answered =
-    Number.isInteger(choice) && (choice as number) >= 0 && (choice as number) < (question.options?.length ?? 0);
-  if (!answered) return "unanswered";
-  return choice === question.correctAnswer ? "correct" : "incorrect";
-}
-
 function buildInsights(
   overall: { correct: number; incorrect: number; unanswered: number; total: number; percentile: number },
   subjects: GroupRow[],
@@ -168,7 +161,7 @@ export function analyzeAttempt(input: {
 
   const questionRows = questions.map((q, i) => {
     const choice = attempt.answers?.[q.id];
-    const outcome = outcomeOf(q, choice);
+    const outcome = answerOutcome(q, choice);
     const marks = marksFor(q, attempt.marking);
     return {
       id: q.id,
@@ -181,6 +174,8 @@ export function analyzeAttempt(input: {
       section: sectionOf.get(q.id)!,
       choice: outcome === "unanswered" ? null : (choice as number),
       correctAnswer: q.correctAnswer ?? null,
+      type: q.type ?? "MCQ",
+      answerRange: q.answerRange ?? null,
       outcome,
       marksAwarded: outcome === "correct" ? marks.correct : outcome === "incorrect" ? -marks.wrong : 0,
       marksPossible: marks.correct,

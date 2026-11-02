@@ -22,6 +22,7 @@ import {
   X
 } from "lucide-react";
 import ExamSettingsPanel from "./ExamSettingsPanel";
+import MathText from "@/app/components/MathText";
 import {
   orderedQuestionIds,
   placeQuestion,
@@ -41,7 +42,10 @@ interface Question {
   type?: string;
   tags?: string[];
   marks?: number;
+  answerRange?: { min: number; max: number };
 }
+
+const QUESTION_TYPE_LABELS: Record<string, string> = { true_false: "True / False", numeric: "Numeric" };
 
 interface Exam {
   _id?: string;
@@ -530,7 +534,7 @@ function AdminExamEditorContent() {
                           {orderedExamQuestions.indexOf(q) + 1}.
                         </span>
                         <p className="text-sm text-gray-800 leading-relaxed font-medium">
-                          {q.text}
+                          <MathText text={q.text} />
                         </p>
                       </div>
 
@@ -549,7 +553,7 @@ function AdminExamEditorContent() {
                               <span className="font-bold uppercase text-[10px] text-gray-400">
                                 {String.fromCharCode(65 + oIdx)}.
                               </span>
-                              <span>{opt}</span>
+                              <span><MathText text={opt} /></span>
                             </div>
                           ))}
                         </div>
@@ -558,8 +562,13 @@ function AdminExamEditorContent() {
                       {/* Badges */}
                       <div className="flex items-center gap-2 flex-wrap mt-3 ml-5">
                         <span className="text-[11px] font-medium text-sky-600 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-md">
-                          MCQ
+                          {QUESTION_TYPE_LABELS[q.type ?? ""] ?? "MCQ"}
                         </span>
+                        {q.type === "numeric" && q.answerRange && (
+                          <span className="text-[11px] font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+                            Answer: {q.answerRange.min === q.answerRange.max ? q.answerRange.min : `${q.answerRange.min} to ${q.answerRange.max}`}
+                          </span>
+                        )}
                         <span
                           className={`text-[11px] font-medium px-2 py-0.5 rounded-md border ${
                             q.difficulty === "Hard"
@@ -831,7 +840,7 @@ function AdminExamEditorContent() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <p className="text-xs text-gray-900 leading-relaxed font-medium flex-1">
-                        {q.text}
+                        <MathText text={q.text} />
                       </p>
 
                       {/* Add button */}
@@ -869,7 +878,7 @@ function AdminExamEditorContent() {
                             <span className="font-bold mr-1">
                               {String.fromCharCode(65 + oIdx)}.
                             </span>
-                            {opt}
+                            <MathText text={opt} />
                           </div>
                         ))}
                       </div>
@@ -878,7 +887,7 @@ function AdminExamEditorContent() {
                     {/* Badges */}
                     <div className="flex items-center gap-2 flex-wrap mt-2.5">
                       <span className="text-[10px] font-medium text-sky-600 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded-md">
-                        MCQ
+                        {QUESTION_TYPE_LABELS[q.type ?? ""] ?? "MCQ"}
                       </span>
                       <span
                         className={`text-[10px] font-medium px-2 py-0.5 rounded-md border ${

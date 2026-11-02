@@ -4,6 +4,7 @@ import { useRouter, useParams } from "next/navigation";
 import RamRajLogo from "../../components/RamRajLogo";
 import { useAuth } from "../../components/AuthProvider";
 import { MAX_WARNINGS } from "@/lib/proctoring";
+import MathText from "../../components/MathText";
 import { CameraAlert, CameraBlockedOverlay, CameraPreview, LongAbsenceDialog, useCameraProctor } from "./CameraProctor";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -335,6 +336,34 @@ function SubmitDialog({
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── Typed answer for numeric questions ────────────────────────────────────────
+function NumericAnswer({ value, onChange }: { value?: number; onChange: (value: number | null) => void }) {
+  // Kept as text so that a half-typed "1." or "-" isn't rejected while typing.
+  const [text, setText] = useState(value === undefined ? "" : String(value));
+  return (
+    <div>
+      <label htmlFor="numeric-answer" style={{ display: "block", fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 6 }}>
+        Type your answer as a number
+      </label>
+      <input
+        id="numeric-answer"
+        type="text"
+        inputMode="decimal"
+        autoComplete="off"
+        value={text}
+        onChange={(e) => {
+          const next = e.target.value;
+          if (!/^-?\d*\.?\d*$/.test(next)) return;
+          setText(next);
+          const number = Number(next);
+          onChange(next === "" || next === "-" || next === "." || next === "-." || !Number.isFinite(number) ? null : number);
+        }}
+        style={{ width: 220, padding: "10px 12px", fontSize: 16, border: "1px solid #d1d5db", borderRadius: 8 }}
+      />
     </div>
   );
 }
@@ -1029,7 +1058,10 @@ function ExamPageContent() {
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       // Enter on a focused button must only press that button, and the keys do nothing behind the dialog.
-      if (showSubmit || away || needsFullscreen || camera.longAbsence || warningToShow !== null || (e.target as HTMLElement)?.tagName === "BUTTON") return;
+      // Keys typed into the numeric answer box belong to that box.
+      const focused = (e.target as HTMLElement)?.tagName;
+      const typing = focused === "INPUT" && (e.target as HTMLInputElement).type === "text";
+      if (showSubmit || away || needsFullscreen || camera.longAbsence || warningToShow !== null || focused === "BUTTON" || typing) return;
       if (e.key === "ArrowRight") goNext();
       if (e.key === "ArrowLeft") goBack();
       if (e.key === "Enter") saveAndNext();
@@ -1329,12 +1361,19 @@ function ExamPageContent() {
                 padding: "0 4px",
               }}
             >
-              {currentQ.text}
+              <MathText text={currentQ.text} />
             </div>
 
             {/* Options */}
             <div style={{ maxWidth: 680 }}>
-              {currentQ.options.map((option: string, idx: number) => (
+              {currentQ.type === "numeric" && (
+                <NumericAnswer
+                  key={currentQ.id}
+                  value={selectedAnswer}
+                  onChange={(value) => (value === null ? clearResponse() : selectAnswer(value))}
+                />
+              )}
+              {(currentQ.options ?? []).map((option: string, idx: number) => (
                 <div
                   key={idx}
                   className={`exam-option ${selectedAnswer === idx ? "selected" : ""}`}
@@ -1376,7 +1415,7 @@ function ExamPageContent() {
                       flex: 1,
                     }}
                   >
-                    {option}
+                    <MathText text={option} />
                   </label>
                 </div>
               ))}

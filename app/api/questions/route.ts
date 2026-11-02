@@ -23,7 +23,8 @@ export async function GET(req: Request) {
       filter.subject = subject;
     }
     if (chapter && chapter !== "All" && chapter !== "All Chapters") {
-      filter.chapter = chapter;
+      // Imported questions can belong to several chapters.
+      filter.$and = [{ $or: [{ chapter }, { chapters: chapter }] }];
     }
     if (difficulty && difficulty !== "All") {
       filter.difficulty = difficulty;
@@ -52,7 +53,12 @@ export async function GET(req: Request) {
 
     // Taken from the questions themselves, so the filter never offers a chapter with nothing in it.
     const chapters = subject && subject !== "All" && subject !== "All Subjects"
-      ? (await db.collection("questions").distinct("chapter", { subject })).filter(Boolean).sort()
+      ? [
+          ...new Set([
+            ...(await db.collection("questions").distinct("chapter", { subject })),
+            ...(await db.collection("questions").distinct("chapters", { subject })),
+          ]),
+        ].filter(Boolean).sort()
       : undefined;
 
     return NextResponse.json({

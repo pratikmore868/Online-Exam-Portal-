@@ -81,7 +81,8 @@ export function parseAttemptState(attempt: Document, body: Record<string, any>) 
   if (body.answers && typeof body.answers === "object") {
     const answers: Record<string, number> = {};
     for (const [id, value] of Object.entries(body.answers)) {
-      if (valid.has(id) && Number.isInteger(value) && (value as number) >= 0 && (value as number) < 26) {
+      // Any real number, because numeric questions take decimals. Scoring checks it against each question.
+      if (valid.has(id) && typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 1e12) {
         answers[id] = value as number;
       }
     }

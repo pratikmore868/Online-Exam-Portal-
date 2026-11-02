@@ -39,6 +39,8 @@ async function createIndexes(db: Db) {
     db.collection("admins").createIndex({ username: 1 }, { unique: true }),
     db.collection("students").createIndex({ id: 1 }),
     db.collection("students").createIndex({ batch: 1 }),
+    db.collection("question_images").createIndex({ id: 1 }, { unique: true }),
+    db.collection("questions").createIndex({ contentHash: 1 }),
     db.collection("exams").createIndex({ id: 1 }),
     db.collection("questions").createIndex({ id: 1 }),
   ]);

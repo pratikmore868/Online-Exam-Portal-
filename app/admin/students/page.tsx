@@ -12,10 +12,13 @@ import {
   Plus,
   X,
   CheckSquare,
-  Square
+  Square,
+  Upload
 } from "lucide-react";
 import { useAuth } from "@/app/components/AuthProvider";
 import { friendlyDay } from "@/lib/dates";
+import { issueAndDownloadPasswords } from "@/lib/issuePasswordsClient";
+import Link from "next/link";
 
 interface Student {
   id: string;
@@ -274,49 +277,12 @@ export default function AdminStudentsPage() {
     if (!confirm(`Create first-time passwords for students in "${selectedBatch}" who don't have one yet? Students who already have a password are not affected.\n\nA CSV with the passwords will download. Keep it private and delete it after handing the passwords out.`)) return;
 
     setIssuingPasswords(true);
-    const issued: any[] = [];
-    try {
-      // The server issues a limited number per request.
-      for (;;) {
-        const res = await fetch("/api/students/issue-passwords", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ batch: selectedBatch })
-        });
-        const data = await res.json();
-        if (!data.success) {
-          alert(data.error || "Could not issue passwords.");
-          break;
-        }
-        issued.push(...data.issued);
-        if (data.remaining === 0 || data.issued.length === 0) break;
-      }
-    } catch (e) {
-      console.error("Issue passwords error:", e);
-      alert("The connection was lost. Any passwords created so far are in the download; run this again for the rest.");
-    } finally {
-      setIssuingPasswords(false);
-    }
+    const { count, failure } = await issueAndDownloadPasswords(selectedBatch);
+    setIssuingPasswords(false);
 
-    if (issued.length === 0) {
-      alert("Every student in this batch already has a password.");
-      return;
-    }
-
-    const quote = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
-    const csv = [
-      "Student ID,Name,Batch,Phone,Temporary Password",
-      ...issued.map((s) => [s.id, s.name, s.batch, s.phone, s.tempPassword].map(quote).join(","))
-    ].join("\n");
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `ram_raj_student_passwords_${Date.now()}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    alert(`Created passwords for ${issued.length} student(s). The CSV has been downloaded.`);
+    if (failure) alert(failure);
+    else if (count === 0) alert("Every student in this batch already has a password.");
+    else alert(`Created passwords for ${count} student(s). The CSV has been downloaded.`);
   };
 
   return (
@@ -342,6 +308,13 @@ export default function AdminStudentsPage() {
 
         {/* Action Buttons matching Screenshot 4 */}
         <div className="flex items-center gap-3">
+          <Link
+            href="/admin/students/bulk-import"
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-xs"
+          >
+            <Upload className="w-4 h-4 text-gray-500" />
+            <span>Bulk Import</span>
+          </Link>
           {isAdmin && (
             <button
               onClick={handleIssuePasswords}

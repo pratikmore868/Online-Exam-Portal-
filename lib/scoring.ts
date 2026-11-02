@@ -19,6 +19,23 @@ export interface ScorableQuestion {
   marks?: number;
   options?: unknown[];
   correctAnswer?: number;
+  type?: string;
+  answerRange?: { min: number; max: number };
+}
+
+// Numeric answers are compared with a small allowance, because 0.1 + 0.2 isn't exactly 0.3 in a computer.
+const NUMERIC_TOLERANCE = 1e-9;
+
+export function answerOutcome(question: ScorableQuestion, choice: unknown): "correct" | "incorrect" | "unanswered" {
+  if (question.type === "numeric") {
+    if (typeof choice !== "number" || !Number.isFinite(choice)) return "unanswered";
+    const range = question.answerRange;
+    return range && choice >= range.min - NUMERIC_TOLERANCE && choice <= range.max + NUMERIC_TOLERANCE
+      ? "correct"
+      : "incorrect";
+  }
+  if (!isValidChoice(choice, question)) return "unanswered";
+  return choice === question.correctAnswer ? "correct" : "incorrect";
 }
 
 export interface Tally {
@@ -77,13 +94,13 @@ export function scoreAttempt(
     const subject = question.subject || "General";
     const tally = (bySubject[subject] ??= emptyTally());
     const { correct, wrong } = marksFor(question, marking);
-    const choice = answers[question.id];
+    const outcome = answerOutcome(question, answers[question.id]);
 
     for (const t of [overall, tally]) t.maxScore += correct;
 
-    if (!isValidChoice(choice, question)) {
+    if (outcome === "unanswered") {
       for (const t of [overall, tally]) t.unanswered += 1;
-    } else if (choice === question.correctAnswer) {
+    } else if (outcome === "correct") {
       for (const t of [overall, tally]) {
         t.correct += 1;
         t.score += correct;
@@ -119,6 +136,12 @@ export function markingLabel(marking: Marking = DEFAULT_MARKING) {
 
 // A question that can't be marked fairly must not reach students.
 export function questionProblem(question: ScorableQuestion): string | null {
+  if (question.type === "numeric") {
+    const range = question.answerRange;
+    return range && Number.isFinite(range.min) && Number.isFinite(range.max) && range.min <= range.max
+      ? null
+      : "has no valid numeric answer";
+  }
   if (!Array.isArray(question.options) || question.options.length < 2) {
     return "needs at least 2 options";
   }

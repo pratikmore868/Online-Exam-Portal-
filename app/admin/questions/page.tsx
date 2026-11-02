@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { ArrowRight, RotateCw } from "lucide-react";
+import { ArrowRight, RotateCw, Upload } from "lucide-react";
 
 export default function AdminQuestionsPage() {
   const [subjects, setSubjects] = useState<any[]>([]);
@@ -34,6 +34,13 @@ export default function AdminQuestionsPage() {
             Choose a subject to see its questions
           </p>
         </div>
+        <Link
+          href="/admin/questions/bulk-import"
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-[#287FC1] hover:bg-[#1a5f94] rounded-lg shadow-xs"
+        >
+          <Upload className="w-4 h-4" />
+          Bulk Import
+        </Link>
       </div>
 
       {loading && (

@@ -8,6 +8,7 @@ import { useAuth } from "@/app/components/AuthProvider";
 import { CAMERA_INCIDENT_LABELS, CAMERA_PHOTO_RETENTION_DAYS, MAX_WARNINGS, VIOLATION_LABELS, type CameraIncidentType } from "@/lib/proctoring";
 import { markingLabel } from "@/lib/scoring";
 import { friendlyDateTime } from "@/lib/dates";
+import MathText from "@/app/components/MathText";
 
 const OUTCOME_COLORS = {
   correct: "#059669",
@@ -438,7 +439,16 @@ function SolutionsTab({ data }: { data: any }) {
               <span className={`px-2 py-0.5 rounded-md text-xs font-medium border ${badge[q.outcome]}`}>{OUTCOME_LABELS[q.outcome]}</span>
             </div>
           </div>
-          <p className="text-sm text-gray-900 mb-3 whitespace-pre-wrap">{q.text}</p>
+          <p className="text-sm text-gray-900 mb-3 whitespace-pre-wrap"><MathText text={q.text} /></p>
+          {q.type === "numeric" && (
+            <div className="text-sm text-gray-800 space-y-1">
+              <div><strong>Student&apos;s answer:</strong> {q.choice ?? "Not attempted"}</div>
+              <div>
+                <strong>Correct answer:</strong>{" "}
+                {q.answerRange?.min === q.answerRange?.max ? q.answerRange?.min : `${q.answerRange?.min} to ${q.answerRange?.max}`}
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
             {q.options.map((option: string, i: number) => {
               const isCorrect = i === q.correctAnswer;
@@ -451,7 +461,7 @@ function SolutionsTab({ data }: { data: any }) {
               return (
                 <div key={i} className={`flex items-start gap-2 px-3 py-2 rounded-lg border text-sm text-gray-800 ${style}`}>
                   <span className="font-bold text-xs mt-0.5">{String.fromCharCode(65 + i)}.</span>
-                  <span className="flex-1">{option}</span>
+                  <span className="flex-1"><MathText text={option} /></span>
                   {isCorrect && <span className="text-xs font-semibold text-emerald-800 whitespace-nowrap">✓ Correct answer</span>}
                   {isChosen && !isCorrect && <span className="text-xs font-semibold text-red-800 whitespace-nowrap">✗ Student&apos;s answer</span>}
                   {isChosen && isCorrect && <span className="text-xs font-semibold text-emerald-800 whitespace-nowrap">• Student&apos;s answer</span>}
@@ -461,7 +471,7 @@ function SolutionsTab({ data }: { data: any }) {
           </div>
           {q.explanation && (
             <div className="mt-3 p-3 bg-blue-50 rounded-lg text-sm text-gray-800 whitespace-pre-wrap">
-              <strong>Explanation:</strong> {q.explanation}
+              <strong>Explanation:</strong> <MathText text={q.explanation} />
             </div>
           )}
         </div>

@@ -12,6 +12,9 @@
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "1.2.0",
+    "@xmldom/xmldom": "0.9.8",
+    "jszip": "3.10.1",
+    "katex": "0.16.21",
     "lucide-react": "^1.66.0",
     "mongodb": "^7.8.0",
     "mongoose": "^9.11.4",
@@ -21,6 +24,7 @@
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
+    "@types/katex": "0.16.7",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

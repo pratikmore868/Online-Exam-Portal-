@@ -55,6 +55,13 @@ You need Node.js 22 or later and a MongoDB database.
 - **Students** log in with their student ID. They have no password until staff give them one: use **Issue Passwords** on the Students page for a whole batch (downloads a CSV), or the key icon for one student. Temporary passwords must be changed at first login.
 - **Teachers and admins** are created with `scripts/create-admin.mjs` (add `teacher` as the last argument for a teacher). Only admins can delete students, subjects, chapters and exams, issue passwords in bulk, or remove a result to allow a retake.
 
+## Bulk import
+
+Both importers show a preview first, list what's wrong with each row, and skip anything already on the portal. Download the sample files from each page.
+
+- **Questions** (Questions → Bulk Import): a Word `.docx` file of up to 4 MB, with one table per question, in the format of [BulkImportSample.docx](public/samples/BulkImportSample.docx). Word equations and pictures are kept. The supported types are MCQ with one correct option, `true_false` and `numeric` (one value or a range like `1.2-3.4`). Questions go into the question bank, and can also be added to a paper as they're imported.
+- **Students** (Students → Bulk Import): a `.csv` file with the first line `name,email,phone,dob`, as in [sample-students.csv](public/samples/sample-students.csv). Name and a 10-digit phone are required. The batch is chosen on the page, and student IDs are created automatically. Students need a password before they can log in.
+
 ## How exams work
 
 1. Staff create an exam, which starts as a **draft** that students cannot see.
