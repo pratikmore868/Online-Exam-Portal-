@@ -3,6 +3,7 @@ import React, { useState, useEffect, Suspense } from "react";
 import { useRouter, useParams } from "next/navigation";
 import RamRajLogo from "../../../components/RamRajLogo";
 import { useAuth } from "../../../components/AuthProvider";
+import { MAX_WARNINGS } from "@/lib/proctoring";
 import { markingLabel } from "@/lib/scoring";
 
 function ExamInstructionsContent() {
@@ -114,6 +115,7 @@ function ExamInstructionsContent() {
     "Assigned Student Batch: **" + batch + "**.",
     "Your answers are **saved automatically**. If your browser closes or your internet drops, log in again and you can continue where you stopped, but the timer does not pause.",
     "You can attempt this exam **only once**.",
+    "**Stay on the exam screen.** Each time you switch tabs, minimise the browser, move to another window or exit full screen, the paper is hidden, you get a warning, and it is recorded. **On warning " + MAX_WARNINGS + ", your exam is submitted automatically.**",
     "Read each question carefully before selecting an answer. You can navigate between questions using the question palette.",
     "Use **SAVE & NEXT** to save your answer and move to the next question.",
     "Use **MARK FOR REVIEW** to flag questions you want to revisit later.",

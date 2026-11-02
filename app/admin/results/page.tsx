@@ -1,25 +1,26 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import {
   Search,
   ChevronDown,
   Download,
-  CheckCircle2,
+  RefreshCw,
+  ArrowUpDown,
+  X,
+  Users,
+  Target,
+  TrendingUp,
+  Zap,
   Clock,
-  RotateCcw
+  Activity,
+  ListOrdered,
+  Trophy
 } from "lucide-react";
-import { useAuth } from "@/app/components/AuthProvider";
+import { submitTypeLabel } from "@/lib/proctoring";
 
 const PAGE_SIZE = 50;
-
-function buildParams(exam: string, batch: string, search: string, page: number, limit: number) {
-  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
-  if (exam !== "All Exams") params.set("examId", exam);
-  if (batch !== "All Batches") params.set("batch", batch);
-  if (search.trim()) params.set("q", search.trim());
-  return params;
-}
 
 function formatDuration(seconds: number) {
   const h = Math.floor(seconds / 3600);
@@ -27,11 +28,39 @@ function formatDuration(seconds: number) {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
-export default function AdminResultsPage() {
-  const { user } = useAuth();
+function StatCard({
+  label,
+  value,
+  sub,
+  icon: Icon,
+  valueClass,
+}: {
+  label: string;
+  value: string | number;
+  sub: string;
+  icon: React.ElementType;
+  valueClass: string;
+}) {
+  return (
+    <div className="bg-white p-6 rounded-xl border border-gray-200/90 shadow-xs">
+      <div className="flex items-center justify-between mb-5">
+        <span className="text-sm font-medium text-gray-800">{label}</span>
+        <Icon className={`w-4 h-4 ${valueClass}`} />
+      </div>
+      <div className={`text-2xl font-bold ${valueClass}`}>{value}</div>
+      <div className="text-xs text-gray-500 mt-1">{sub}</div>
+    </div>
+  );
+}
 
-  const [selectedExam, setSelectedExam] = useState<string>("All Exams");
-  const [selectedBatch, setSelectedBatch] = useState<string>("All Batches");
+const selectClass =
+  "w-full appearance-none bg-white border border-gray-200 text-gray-800 text-sm rounded-lg px-3.5 py-2.5 pr-9 hover:border-gray-300 focus:outline-hidden focus:ring-2 focus:ring-[#287FC1] shadow-xs cursor-pointer";
+
+export default function AdminResultsPage() {
+  const [selectedExam, setSelectedExam] = useState("All Exams");
+  const [selectedBatch, setSelectedBatch] = useState("All Batches");
+  const [sortKey, setSortKey] = useState("rank");
+  const [reversed, setReversed] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -48,12 +77,22 @@ export default function AdminResultsPage() {
     return () => clearTimeout(handler);
   }, [searchQuery]);
 
+  const buildParams = useCallback(
+    (forPage: number, limit: number) => {
+      const params = new URLSearchParams({ page: String(forPage), limit: String(limit), sort: sortKey, dir: reversed ? "desc" : "asc" });
+      if (selectedExam !== "All Exams") params.set("examId", selectedExam);
+      if (selectedBatch !== "All Batches") params.set("batch", selectedBatch);
+      if (debouncedSearch.trim()) params.set("q", debouncedSearch.trim());
+      return params;
+    },
+    [selectedExam, selectedBatch, debouncedSearch, sortKey, reversed]
+  );
+
   const fetchResults = useCallback(async () => {
     setLoading(true);
     setLoadFailed(false);
     try {
-      const params = buildParams(selectedExam, selectedBatch, debouncedSearch, page, PAGE_SIZE);
-      const res = await fetch(`/api/results?${params.toString()}`);
+      const res = await fetch(`/api/results?${buildParams(page, PAGE_SIZE).toString()}`);
       const body = await res.json();
       if (body.success) {
         setData(body);
@@ -66,17 +105,16 @@ export default function AdminResultsPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedExam, selectedBatch, debouncedSearch, page]);
+  }, [buildParams, page]);
 
   useEffect(() => {
     fetchResults();
   }, [fetchResults]);
 
-  // Export Results CSV (every matching row, not just this page)
-  const handleExportCSV = async () => {
+  // Exports every matching row, not just this page. Excel opens CSV files directly.
+  const handleExport = async () => {
     try {
-      const params = buildParams(selectedExam, selectedBatch, debouncedSearch, 1, 5000);
-      const res = await fetch(`/api/results?${params.toString()}`);
+      const res = await fetch(`/api/results?${buildParams(1, 5000).toString()}`);
       const body = await res.json();
       if (!body.success) {
         alert(body.error || "Could not export results.");
@@ -84,7 +122,7 @@ export default function AdminResultsPage() {
       }
 
       const quote = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
-      const headers = ["Rank", "Student ID", "Student Name", "Batch", "Exam Title", "Score", "Max Score", "Percentage", "Correct", "Wrong", "Unattempted", "Time Taken (min)", "Submitted", "Submitted By"];
+      const headers = ["Rank", "Student ID", "Student Name", "Batch", "Exam Title", "Score", "Max Score", "Percentage", "Percentile", "Accuracy", "Correct", "Wrong", "Unattempted", "Time Taken (min)", "Submitted", "Submission Type", "Warnings"];
       const rows = body.results.map((a: any) => [
         a.rank,
         a.studentId,
@@ -94,15 +132,19 @@ export default function AdminResultsPage() {
         a.result.score,
         a.result.maxScore,
         a.result.percentage,
+        a.percentile,
+        a.accuracy,
         a.result.correct,
         a.result.incorrect,
         a.result.unanswered,
         Math.round(a.result.timeTakenSeconds / 60),
         new Date(a.submittedAt).toLocaleString("en-IN"),
-        a.submitType === "time_up" ? "Time ran out" : "Student",
+        submitTypeLabel(a.submitType),
+        a.violationCount ?? 0,
       ].map(quote).join(","));
 
-      const url = URL.createObjectURL(new Blob([[headers.join(","), ...rows].join("\n")], { type: "text/csv;charset=utf-8" }));
+      // The leading BOM makes Excel read Hindi and Marathi names correctly.
+      const url = URL.createObjectURL(new Blob(["﻿" + [headers.join(","), ...rows].join("\n")], { type: "text/csv;charset=utf-8" }));
       const link = document.createElement("a");
       link.href = url;
       link.download = `ram_raj_exam_results_${Date.now()}.csv`;
@@ -116,217 +158,292 @@ export default function AdminResultsPage() {
     }
   };
 
-  const handleAllowRetake = async (attempt: any) => {
-    if (!confirm(`Delete ${attempt.studentName}'s result for "${attempt.examTitle}" (${attempt.result.score}/${attempt.result.maxScore}) so they can sit it again?\n\nThis cannot be undone.`)) return;
+  const results: any[] = data?.results ?? [];
+  const exams: any[] = data?.exams ?? [];
+  const exam = exams.find((e) => e.id === selectedExam);
+  const hasFilters = selectedExam !== "All Exams" || selectedBatch !== "All Batches" || !!searchQuery;
 
-    try {
-      const res = await fetch(`/api/attempts/${attempt.id}`, { method: "DELETE" });
-      const body = await res.json();
-      if (!body.success) {
-        alert(body.error || "Could not delete this result.");
-        return;
-      }
-      fetchResults();
-    } catch (err) {
-      console.error("Retake error:", err);
-      alert("Could not reach the server.");
-    }
+  const clearFilters = () => {
+    setSelectedExam("All Exams");
+    setSelectedBatch("All Batches");
+    setSearchQuery("");
+    setPage(1);
   };
 
-  const results: any[] = data?.results ?? [];
-  // Ranks only make sense when everyone in the list sat the same paper.
-  const showRank = selectedExam !== "All Exams";
-  const colCount = 8 + (user.role === "admin" ? 1 : 0);
+  // Raw marks only compare fairly within one paper, so "All Exams" uses percentages.
+  const averageValue = exam
+    ? (data?.averageScore != null ? data.averageScore.toFixed(1) : "—")
+    : (data?.average != null ? `${data.average.toFixed(1)}%` : "—");
+  const averageSub = exam && data?.averageScore != null && data.topScore > 0
+    ? `${((data.averageScore / data.topScore) * 100).toFixed(1)}% of top score`
+    : "Across these submissions";
+  const highestValue = exam
+    ? (data?.topScore ?? "—")
+    : (data?.top != null ? `${data.top}%` : "—");
 
   return (
-    <div className="p-8 max-w-[1400px] mx-auto w-full space-y-6">
+    <div className="p-8 max-w-[1500px] mx-auto w-full space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">
-            Examination Results & Rankings
-          </h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Submitted attempts, scored on the server
-          </p>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Results</h1>
+          <p className="text-sm text-gray-500 mt-0.5">View and analyze exam results</p>
         </div>
-
         <button
-          onClick={handleExportCSV}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-xs cursor-pointer"
+          onClick={fetchResults}
+          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors shadow-xs cursor-pointer"
         >
-          <Download className="w-4 h-4 text-gray-500" />
-          <span>Export Results CSV</span>
+          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          Refresh
         </button>
       </div>
 
-      {/* Summary KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-xl border border-gray-200/90 shadow-xs">
-          <div className="text-xs font-medium text-gray-500 mb-1">Total Submissions</div>
-          <div className="text-2xl font-extrabold text-gray-900">{data?.total ?? 0}</div>
-          <div className="text-[11px] text-gray-400 mt-1">Matching the filters</div>
-        </div>
-
-        <div className="bg-white p-5 rounded-xl border border-gray-200/90 shadow-xs">
-          <div className="text-xs font-medium text-gray-500 mb-1">In Progress Now</div>
-          <div className="text-2xl font-extrabold text-amber-600">{data?.inProgress ?? 0}</div>
-          <div className="text-[11px] text-gray-400 mt-1">Students currently writing</div>
-        </div>
-
-        <div className="bg-white p-5 rounded-xl border border-gray-200/90 shadow-xs">
-          <div className="text-xs font-medium text-gray-500 mb-1">Top Score</div>
-          <div className="text-2xl font-extrabold text-emerald-600">
-            {data?.top != null ? `${data.top}%` : "N/A"}
+      {/* Filters */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 pb-4 border-b border-gray-200">
+        <div>
+          <label htmlFor="filter-batch" className="block text-sm font-medium text-gray-700 mb-1.5">Batch</label>
+          <div className="relative">
+            <select
+              id="filter-batch"
+              value={selectedBatch}
+              onChange={(e) => {
+                setSelectedBatch(e.target.value);
+                setPage(1);
+              }}
+              className={selectClass}
+            >
+              {(data?.batches ?? ["All Batches"]).map((b: string) => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
+            <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
-          <div className="text-[11px] text-gray-400 mt-1">Highest percentage</div>
         </div>
 
-        <div className="bg-white p-5 rounded-xl border border-gray-200/90 shadow-xs">
-          <div className="text-xs font-medium text-gray-500 mb-1">Average Score</div>
-          <div className="text-2xl font-extrabold text-[#287FC1]">
-            {data?.average != null ? `${data.average.toFixed(1)}%` : "N/A"}
+        <div>
+          <label htmlFor="filter-exam" className="block text-sm font-medium text-gray-700 mb-1.5">Exam</label>
+          <div className="relative">
+            <select
+              id="filter-exam"
+              value={selectedExam}
+              onChange={(e) => {
+                setSelectedExam(e.target.value);
+                setPage(1);
+              }}
+              className={selectClass}
+            >
+              <option value="All Exams">All Exams</option>
+              {exams.map((ex) => (
+                <option key={ex.id} value={ex.id}>{ex.title}</option>
+              ))}
+            </select>
+            <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
-          <div className="text-[11px] text-gray-400 mt-1">Across these submissions</div>
+          {exam && (
+            <p className="text-xs text-gray-500 mt-1">{exam.totalMarks} marks • {exam.duration} min</p>
+          )}
+        </div>
+
+        <div>
+          <label htmlFor="filter-search" className="block text-sm font-medium text-gray-700 mb-1.5">Search</label>
+          <div className="relative">
+            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              id="filter-search"
+              type="text"
+              placeholder="Student name or ID..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-white border border-gray-200 text-gray-900 text-sm rounded-lg pl-9 pr-4 py-2.5 hover:border-gray-300 focus:outline-hidden focus:ring-2 focus:ring-[#287FC1] shadow-xs"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label htmlFor="filter-sort" className="block text-sm font-medium text-gray-700 mb-1.5">Sort Results</label>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setReversed((prev) => !prev)}
+              title="Reverse the order"
+              aria-label="Reverse the order"
+              aria-pressed={reversed}
+              className="inline-flex items-center px-3 border border-gray-200 rounded-lg bg-white hover:bg-gray-50 text-gray-700 shadow-xs cursor-pointer"
+            >
+              <ArrowUpDown className="w-4 h-4" />
+            </button>
+            <div className="relative flex-1">
+              <select
+                id="filter-sort"
+                value={sortKey}
+                onChange={(e) => {
+                  setSortKey(e.target.value);
+                  setPage(1);
+                }}
+                className={selectClass}
+              >
+                <option value="rank">Rank</option>
+                <option value="name">Name</option>
+                <option value="time">Time Taken</option>
+                <option value="submitted">Latest Submitted</option>
+              </select>
+              <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Filter Toolbar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-        {/* Exam Select */}
-        <div className="relative min-w-[220px]">
-          <select
-            aria-label="Filter by exam"
-            value={selectedExam}
-            onChange={(e) => {
-              setSelectedExam(e.target.value);
-              setPage(1);
-            }}
-            className="w-full appearance-none bg-white border border-gray-200 text-gray-800 text-sm font-medium rounded-lg px-3.5 py-2 pr-9 hover:border-gray-300 focus:outline-hidden focus:ring-2 focus:ring-[#287FC1] shadow-xs cursor-pointer"
-          >
-            <option value="All Exams">All Exams</option>
-            {(data?.exams ?? []).map((ex: any) => (
-              <option key={ex.id} value={ex.id}>
-                {ex.title}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+      {/* Active filters */}
+      {hasFilters && (
+        <div className="flex items-center gap-2 flex-wrap text-xs">
+          <span className="text-sm text-gray-500">Active filters:</span>
+          {selectedBatch !== "All Batches" && (
+            <button onClick={() => setSelectedBatch("All Batches")} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 rounded-lg font-medium text-gray-800 cursor-pointer">
+              Batch: {selectedBatch} <X className="w-3 h-3" />
+            </button>
+          )}
+          {exam && (
+            <button onClick={() => setSelectedExam("All Exams")} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 rounded-lg font-medium text-gray-800 cursor-pointer">
+              Exam: {exam.title} <X className="w-3 h-3" />
+            </button>
+          )}
+          {searchQuery && (
+            <button onClick={() => setSearchQuery("")} className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 rounded-lg font-medium text-gray-800 cursor-pointer">
+              Search: {searchQuery} <X className="w-3 h-3" />
+            </button>
+          )}
+          <button onClick={clearFilters} className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded-lg font-medium text-gray-800 hover:bg-gray-50 cursor-pointer">
+            <X className="w-3 h-3" /> Clear All
+          </button>
         </div>
+      )}
 
-        {/* Batch Select */}
-        <div className="relative min-w-[180px]">
-          <select
-            aria-label="Filter by batch"
-            value={selectedBatch}
-            onChange={(e) => {
-              setSelectedBatch(e.target.value);
-              setPage(1);
-            }}
-            className="w-full appearance-none bg-white border border-gray-200 text-gray-800 text-sm font-medium rounded-lg px-3.5 py-2 pr-9 hover:border-gray-300 focus:outline-hidden focus:ring-2 focus:ring-[#287FC1] shadow-xs cursor-pointer"
-          >
-            {(data?.batches ?? ["All Batches"]).map((b: string) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="w-4 h-4 text-gray-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-        </div>
-
-        {/* Search Input */}
-        <div className="relative flex-1 max-w-md">
-          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-          <input
-            type="text"
-            placeholder="Search by student or test..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-white border border-gray-200 text-gray-900 text-sm rounded-lg pl-9 pr-4 py-2 hover:border-gray-300 focus:outline-hidden focus:ring-2 focus:ring-[#287FC1] shadow-xs"
-          />
-        </div>
+      {/* Title */}
+      <div>
+        <h2 className="text-xl font-bold text-gray-900">{exam ? `${exam.title} Results` : "All Exam Results"}</h2>
+        <p className="text-sm text-gray-500 mt-0.5">
+          {data?.students ?? 0} student{data?.students === 1 ? "" : "s"} participated
+          {data?.inProgress > 0 ? ` • ${data.inProgress} writing now` : ""}
+        </p>
       </div>
 
-      {/* Results Table */}
+      {/* Stat cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <StatCard label="Total Students" value={data?.students ?? 0} sub={`${data?.total ?? 0} total attempts`} icon={Users} valueClass="text-blue-600" />
+        <StatCard label="Average Score" value={averageValue} sub={averageSub} icon={Target} valueClass="text-purple-600" />
+        <StatCard
+          label="Pass Rate"
+          value={data?.passRate != null ? `${data.passRate.toFixed(1)}%` : "—"}
+          sub={`Students scoring ≥${data?.passPercentage ?? 60}%`}
+          icon={TrendingUp}
+          valueClass="text-red-600"
+        />
+        <StatCard label="Highest Score" value={highestValue} sub="Best performance" icon={Zap} valueClass="text-amber-600" />
+        <StatCard
+          label="Average Time"
+          value={data?.averageTime != null ? formatDuration(data.averageTime) : "—"}
+          sub="Time per student"
+          icon={Clock}
+          valueClass="text-orange-600"
+        />
+        <StatCard
+          label="Participation"
+          value={data?.participation?.assigned > 0
+            ? `${Math.min(100, (data.participation.submitted / data.participation.assigned) * 100).toFixed(1)}%`
+            : "—"}
+          sub={data?.participation
+            ? `${data.participation.submitted} of ${data.participation.assigned} students`
+            : "Select an exam to see this"}
+          icon={Activity}
+          valueClass="text-green-600"
+        />
+      </div>
+
+      {/* Results table */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-xs overflow-hidden">
+        <div className="flex items-center justify-between gap-3 p-5 flex-wrap">
+          <div className="flex items-center gap-2">
+            <h3 className="text-base font-semibold text-gray-900">Student Results</h3>
+            <span className="text-xs font-medium px-2.5 py-1 bg-gray-100 rounded-md text-gray-700">{data?.total ?? 0} results</span>
+          </div>
+          <button
+            onClick={handleExport}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-[#287FC1] hover:bg-[#1a5f94] rounded-lg transition-colors cursor-pointer"
+          >
+            <Download className="w-4 h-4" />
+            Export to Excel
+          </button>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
-            <thead className="bg-[#f8fafc] border-b border-gray-200 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+            <thead className="border-y border-gray-200 text-sm font-medium text-gray-700">
               <tr>
-                <th className="py-3.5 px-4 w-14 text-center">{showRank ? "Rank" : "#"}</th>
-                <th className="py-3.5 px-4">Student</th>
-                <th className="py-3.5 px-4">Batch</th>
-                <th className="py-3.5 px-4">Exam</th>
-                <th className="py-3.5 px-4">Score</th>
-                <th className="py-3.5 px-4">Percentage</th>
-                <th className="py-3.5 px-4">Time</th>
-                <th className="py-3.5 px-4">Submitted</th>
-                {user.role === "admin" && <th className="py-3.5 px-4 text-right">Actions</th>}
+                <th className="py-3 px-5">Rank</th>
+                <th className="py-3 px-4">Student</th>
+                {!exam && <th className="py-3 px-4">Exam</th>}
+                <th className="py-3 px-4">Score</th>
+                <th className="py-3 px-4">Percentile</th>
+                <th className="py-3 px-4">Accuracy</th>
+                <th className="py-3 px-4">Time</th>
+                <th className="py-3 px-4">Submission Type</th>
+                <th className="py-3 px-5 text-center">Details</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100 text-gray-700">
+            <tbody className="divide-y divide-gray-100 text-gray-800">
               {results.map((att) => (
                 <tr key={att.id} className="hover:bg-blue-50/30 transition-colors">
-                  <td className="py-3 px-4 text-center font-bold text-gray-600">{att.rank}</td>
-                  <td className="py-3 px-4">
-                    <div className="font-semibold text-gray-900">{att.studentName}</div>
-                    <div className="font-mono text-xs text-[#287FC1]">{att.studentId}</div>
-                  </td>
-                  <td className="py-3 px-4 text-gray-600 text-xs">{att.batch}</td>
-                  <td className="py-3 px-4 font-medium text-gray-800">{att.examTitle}</td>
-                  <td className="py-3 px-4 font-mono font-semibold text-gray-900">
-                    {att.result.score} / {att.result.maxScore}
-                  </td>
-                  <td className="py-3 px-4">
-                    <span
-                      className={`inline-block px-2 py-0.5 rounded text-xs font-bold ${
-                        att.result.percentage >= 75
-                          ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                          : att.result.percentage >= 50
-                          ? "bg-blue-50 text-blue-700 border border-blue-200"
-                          : "bg-amber-50 text-amber-700 border border-amber-200"
-                      }`}
-                    >
-                      {att.result.percentage}%
+                  <td className="py-3.5 px-5 font-semibold text-gray-700">
+                    <span className="inline-flex items-center gap-1.5">
+                      {att.rank <= 3 && (
+                        <Trophy className={`w-4 h-4 ${att.rank === 1 ? "text-amber-500" : att.rank === 2 ? "text-gray-400" : "text-orange-400"}`} />
+                      )}
+                      {att.rank}
                     </span>
                   </td>
-                  <td className="py-3 px-4 text-gray-500 text-xs font-mono">
-                    {formatDuration(att.result.timeTakenSeconds)}
+                  <td className="py-3.5 px-4">
+                    <div className="font-medium text-gray-900">{att.studentName}</div>
+                    <div className="text-xs text-gray-500">ID: {att.studentId} • {att.batch}</div>
                   </td>
-                  <td className="py-3 px-4 text-xs text-gray-500">
-                    <div className="font-mono">
-                      {new Date(att.submittedAt).toLocaleDateString("en-IN", { dateStyle: "medium" })}
-                    </div>
-                    {att.submitType === "time_up" ? (
-                      <span className="inline-flex items-center gap-1 font-medium text-amber-600">
-                        <Clock className="w-3.5 h-3.5" />
-                        Time ran out
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 font-medium text-emerald-600">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        By student
-                      </span>
+                  {!exam && <td className="py-3.5 px-4 text-xs text-gray-700 max-w-[220px]">{att.examTitle}</td>}
+                  <td className="py-3.5 px-4">
+                    <div className="font-medium">{att.result.score} / {att.result.maxScore}</div>
+                    <div className="text-xs text-gray-500">{att.result.percentage}%</div>
+                  </td>
+                  <td className="py-3.5 px-4 font-medium">{att.percentile}</td>
+                  <td className="py-3.5 px-4">{att.accuracy}%</td>
+                  <td className="py-3.5 px-4">{formatDuration(att.result.timeTakenSeconds)}</td>
+                  <td className="py-3.5 px-4">
+                    <span
+                      className={`inline-block px-2.5 py-1 rounded-lg text-xs font-medium border ${
+                        att.submitType === "violations"
+                          ? "bg-red-50 text-red-800 border-red-200"
+                          : att.submitType === "time_up"
+                          ? "bg-amber-50 text-amber-800 border-amber-200"
+                          : "bg-blue-50 text-blue-800 border-blue-200"
+                      }`}
+                    >
+                      {submitTypeLabel(att.submitType)}
+                    </span>
+                    {att.violationCount > 0 && att.submitType !== "violations" && (
+                      <div className="text-xs text-red-700 mt-1">⚠ {att.violationCount} warning{att.violationCount === 1 ? "" : "s"}</div>
                     )}
                   </td>
-                  {user.role === "admin" && (
-                    <td className="py-3 px-4 text-right">
-                      <button
-                        onClick={() => handleAllowRetake(att)}
-                        title="Delete this result and allow a retake"
-                        className="inline-flex items-center gap-1 p-1.5 text-xs text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors cursor-pointer"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        Retake
-                      </button>
-                    </td>
-                  )}
+                  <td className="py-3.5 px-5 text-center">
+                    <Link
+                      href={`/admin/results/${att.id}`}
+                      aria-label={`View details for ${att.studentName}`}
+                      title="View details"
+                      className="inline-flex p-2 text-gray-600 hover:text-[#287FC1] hover:bg-blue-50 rounded-md transition-colors"
+                    >
+                      <ListOrdered className="w-4 h-4" />
+                    </Link>
+                  </td>
                 </tr>
               ))}
 
               {results.length === 0 && (
                 <tr>
-                  <td colSpan={colCount} className="py-12 text-center text-gray-400 text-sm">
+                  <td colSpan={9} className="py-12 text-center text-gray-400 text-sm">
                     {loading
                       ? "Loading results..."
                       : loadFailed

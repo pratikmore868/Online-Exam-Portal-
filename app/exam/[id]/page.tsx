@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import RamRajLogo from "../../components/RamRajLogo";
 import { useAuth } from "../../components/AuthProvider";
+import { MAX_WARNINGS } from "@/lib/proctoring";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 type QuestionStatus =
@@ -337,6 +338,128 @@ function SubmitDialog({
   );
 }
 
+// ── Shown over the blurred paper while the student is away ────────────────────
+function AwayOverlay({ finalWarning, isPreview }: { finalWarning: boolean; isPreview: boolean }) {
+  return (
+    <div
+      role="alert"
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 2000,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
+        background: "rgba(17,24,39,0.75)",
+        color: "#ffffff",
+        textAlign: "center",
+      }}
+    >
+      <div>
+        <div style={{ fontSize: 40, marginBottom: 10 }}>🔒</div>
+        <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800 }}>
+          {finalWarning ? `Warning ${MAX_WARNINGS} of ${MAX_WARNINGS}: submitting your exam` : "Exam paper hidden"}
+        </h2>
+        <p style={{ margin: "8px 0 0", fontSize: 14, opacity: 0.9 }}>
+          {isPreview
+            ? "Preview: students see this when they leave the exam. Nothing is recorded."
+            : finalWarning
+            ? "You left the exam too many times, so it is being submitted automatically."
+            : "You left the exam screen and this has been recorded. Return to this window to continue."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Shown when the student returns ────────────────────────────────────────────
+function WarningDialog({ count, onClose }: { count: number; onClose: () => void }) {
+  const remaining = MAX_WARNINGS - count;
+  const canFullscreen = typeof document !== "undefined" && document.fullscreenEnabled;
+  return (
+    <div className="modal-overlay" style={{ zIndex: 1900 }}>
+      <div className="modal-box" role="alertdialog" aria-labelledby="exam-warning-title">
+        <div style={{ padding: "22px 24px" }}>
+          <h2 id="exam-warning-title" style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#991b1b" }}>
+            ⚠️ Warning {count} of {MAX_WARNINGS}: this has been recorded
+          </h2>
+          <p style={{ margin: "10px 0 0", fontSize: 14, color: "#374151", lineHeight: 1.5 }}>
+            You left the exam screen or full screen. The timer keeps running.{" "}
+            <strong>
+              {remaining === 1
+                ? "If you leave once more, your exam will be submitted automatically."
+                : `Your exam will be submitted automatically if you leave ${remaining} more times.`}
+            </strong>
+          </p>
+        </div>
+        <div style={{ padding: "0 24px 20px", display: "flex", justifyContent: "flex-end" }}>
+          <button
+            autoFocus
+            onClick={onClose}
+            style={{
+              padding: "10px 22px",
+              border: "none",
+              borderRadius: 8,
+              background: "#287FC1",
+              color: "#ffffff",
+              fontSize: 14,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            {canFullscreen ? "Return to Full Screen & Continue" : "I Understand, Continue"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Shown when the exam opens outside full screen, such as after a refresh ────
+function FullscreenPrompt({ onContinue }: { onContinue: () => void }) {
+  return (
+    <div className="modal-overlay" style={{ zIndex: 1900 }}>
+      <div className="modal-box" role="dialog" aria-labelledby="exam-fullscreen-title">
+        <div style={{ padding: "22px 24px" }}>
+          <h2 id="exam-fullscreen-title" style={{ margin: 0, fontSize: 18, fontWeight: 800, color: "#111827" }}>
+            Continue in full screen
+          </h2>
+          <p style={{ margin: "10px 0 0", fontSize: 14, color: "#374151", lineHeight: 1.5 }}>
+            This exam runs in full screen. Your answers are saved and this is not a warning. The timer keeps running.
+          </p>
+        </div>
+        <div style={{ padding: "0 24px 20px", display: "flex", justifyContent: "flex-end" }}>
+          <button
+            autoFocus
+            onClick={onContinue}
+            style={{
+              padding: "10px 22px",
+              border: "none",
+              borderRadius: 8,
+              background: "#287FC1",
+              color: "#ffffff",
+              fontSize: 14,
+              fontWeight: 700,
+              cursor: "pointer",
+            }}
+          >
+            Enter Full Screen
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Browsers only allow this from a click or key press, so it can't happen without the button.
+// It isn't awaited: this promise never settles in some browsers, and the student must not get stuck.
+function enterFullscreen() {
+  if (document.fullscreenEnabled && !document.fullscreenElement) {
+    document.documentElement.requestFullscreen?.().catch(() => undefined);
+  }
+}
+
 // ── Main Exam Page ────────────────────────────────────────────────────────────
 function ExamPageContent() {
   const router = useRouter();
@@ -363,12 +486,22 @@ function ExamPageContent() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("saved");
+  const [away, setAway] = useState(false);
+  const [warningToShow, setWarningToShow] = useState<number | null>(null);
+  const [finalWarning, setFinalWarning] = useState(false);
+  const [needsFullscreen, setNeedsFullscreen] = useState(false);
 
   // The deadline comes from the server, and the offset corrects for a wrong clock
   // on the student's computer, so neither refreshing nor changing the clock adds time.
   const endsAtRef = useRef(0);
   const clockOffsetRef = useRef(0);
   const attemptIdRef = useRef<string | null>(null);
+  const timeSpentRef = useRef<Record<string, number>>({});
+  const questionIdsRef = useRef<string[]>([]);
+  const warningCountRef = useRef(0);
+  // The warning being handled. It stays set until the student acknowledges it, so one
+  // incident that fires several browser events can't use up more than one warning.
+  const currentEventRef = useRef<string | null>(null);
   const isPreview = exam?.preview === true;
 
   const stateRef = useRef(state);
@@ -404,6 +537,12 @@ function ExamPageContent() {
         attemptIdRef.current = attempt.id;
         endsAtRef.current = new Date(attempt.endsAt).getTime();
         clockOffsetRef.current = new Date(attempt.serverNow).getTime() - Date.now();
+        timeSpentRef.current = attempt.timeSpent ?? {};
+        warningCountRef.current = attempt.violationCount ?? 0;
+        if (!attempt.preview && document.fullscreenEnabled && !document.fullscreenElement) {
+          setNeedsFullscreen(true);
+        }
+        questionIdsRef.current = attempt.questions.map((q: any) => q.id);
 
         setExam(attempt);
         setQuestions(attempt.questions);
@@ -447,7 +586,7 @@ function ExamPageContent() {
     const save = fetch(`/api/attempts/${attemptIdRef.current}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ answers, statuses, currentIndex }),
+      body: JSON.stringify({ answers, statuses, currentIndex, timeSpent: timeSpentRef.current }),
     })
       .then(async (res) => {
         if (res.status === 401) {
@@ -506,7 +645,7 @@ function ExamPageContent() {
       fetch(`/api/attempts/${attemptIdRef.current}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers, statuses, currentIndex }),
+        body: JSON.stringify({ answers, statuses, currentIndex, timeSpent: timeSpentRef.current }),
         keepalive: true,
       }).catch(() => undefined);
     };
@@ -524,6 +663,10 @@ function ExamPageContent() {
     const timer = setInterval(() => {
       const left = remainingSeconds();
       setState((prev) => (prev.timeLeft === left ? prev : { ...prev, timeLeft: left }));
+
+      // Seconds on the question currently on screen, for the admin Time Analysis tab.
+      const onScreen = questionIdsRef.current[stateRef.current.currentIndex];
+      if (onScreen) timeSpentRef.current[onScreen] = (timeSpentRef.current[onScreen] ?? 0) + 1;
       if (left <= 0) {
         setAutoSubmit(true);
         setShowSubmit(true);
@@ -677,7 +820,7 @@ function ExamPageContent() {
       const res = await fetch(`/api/attempts/${attemptIdRef.current}/submit`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers, statuses, currentIndex }),
+        body: JSON.stringify({ answers, statuses, currentIndex, timeSpent: timeSpentRef.current }),
       });
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
@@ -705,6 +848,159 @@ function ExamPageContent() {
     return () => clearInterval(retry);
   }, [autoSubmit, isPreview, state.submitted, handleSubmit]);
 
+  // Leaving the exam: hide the paper at once, record it, and warn when the student returns.
+  useEffect(() => {
+    if (fetching || !attemptIdRef.current || state.submitted) return;
+
+    let stopped = false;
+    let isAway = false;
+    let unloading = false;
+    let blurTimer: ReturnType<typeof setTimeout> | null = null;
+    const retryTimers = new Set<ReturnType<typeof setTimeout>>();
+
+    // Keeps retrying through a dropped connection, because the warning must still reach the server.
+    const send = (body: Record<string, unknown>) => {
+      fetch(`/api/attempts/${attemptIdRef.current}/violations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        keepalive: true,
+      })
+        .then(async (res) => {
+          if (res.status === 401 || res.status === 403 || res.status === 404) return;
+          const data = await res.json();
+          if (!data.success) throw new Error(data.error);
+          if (data.status === "submitted") {
+            submittingRef.current = true;
+            if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined);
+            router.replace(`/exam/${examId}/results`);
+          } else if (typeof data.violationCount === "number") {
+            warningCountRef.current = data.violationCount;
+          }
+        })
+        .catch(() => {
+          if (stopped) return;
+          const timer = setTimeout(() => {
+            retryTimers.delete(timer);
+            send(body);
+          }, 3000);
+          retryTimers.add(timer);
+        });
+    };
+
+    const recordLeave = (type: string) => {
+      if (currentEventRef.current) return;
+      currentEventRef.current = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      warningCountRef.current += 1;
+      if (warningCountRef.current >= MAX_WARNINGS) {
+        // The server submits on this report, so stop autosaving now.
+        submittingRef.current = true;
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        setFinalWarning(true);
+      }
+      const { answers, statuses, currentIndex } = stateRef.current;
+      send({ eventId: currentEventRef.current, type, answers, statuses, currentIndex, timeSpent: timeSpentRef.current });
+    };
+
+    const onLeave = (type: string) => {
+      if (unloading || submittingRef.current) return;
+      if (!isAway) {
+        isAway = true;
+        setAway(true);
+      }
+      if (isPreview) return;
+
+      if (type === "tab-hidden") {
+        if (blurTimer) clearTimeout(blurTimer);
+        blurTimer = null;
+        recordLeave(type);
+      } else if (!blurTimer && !currentEventRef.current) {
+        // Losing focus for a moment can be accidental, such as a notification, so give it a second.
+        blurTimer = setTimeout(() => {
+          blurTimer = null;
+          if (isAway) recordLeave(type);
+        }, 1000);
+      }
+    };
+
+    const onReturn = () => {
+      if (!isAway || document.hidden) return;
+      isAway = false;
+      if (blurTimer) clearTimeout(blurTimer);
+      blurTimer = null;
+
+      // On the final warning the paper stays hidden until the results page opens.
+      if (warningCountRef.current >= MAX_WARNINGS && !isPreview) return;
+      setAway(false);
+
+      if (currentEventRef.current) {
+        send({ eventId: currentEventRef.current, returned: true });
+        setWarningToShow(warningCountRef.current);
+      }
+    };
+
+    const handleFullscreenChange = () => {
+      if (document.fullscreenElement) {
+        setNeedsFullscreen(false);
+        return;
+      }
+      if (unloading || submittingRef.current || isPreview || currentEventRef.current) return;
+      recordLeave("fullscreen-exit");
+      if (warningCountRef.current < MAX_WARNINGS) setWarningToShow(warningCountRef.current);
+    };
+
+    // Fullscreen may have finished entering while the exam was still loading.
+    if (document.fullscreenElement) setNeedsFullscreen(false);
+
+    const handleVisibility = () => (document.hidden ? onLeave("tab-hidden") : onReturn());
+    const handleBlur = () => onLeave("window-blur");
+    // A refresh or closing the tab also hides the page, but isn't switching away.
+    const handleUnload = () => {
+      unloading = true;
+      if (blurTimer) clearTimeout(blurTimer);
+      blurTimer = null;
+    };
+    const handlePageShow = () => {
+      unloading = false;
+    };
+
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("blur", handleBlur);
+    window.addEventListener("focus", onReturn);
+    window.addEventListener("beforeunload", handleUnload);
+    window.addEventListener("pagehide", handleUnload);
+    window.addEventListener("pageshow", handlePageShow);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+
+    return () => {
+      stopped = true;
+      if (blurTimer) clearTimeout(blurTimer);
+      retryTimers.forEach(clearTimeout);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("focus", onReturn);
+      window.removeEventListener("beforeunload", handleUnload);
+      window.removeEventListener("pagehide", handleUnload);
+      window.removeEventListener("pageshow", handlePageShow);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, [fetching, isPreview, state.submitted, examId, router]);
+
+  // The click on this button is what the browser requires to go back into full screen.
+  const acknowledgeWarning = () => {
+    const eventId = currentEventRef.current;
+    currentEventRef.current = null;
+    setWarningToShow(null);
+    enterFullscreen();
+    if (eventId && attemptIdRef.current) {
+      fetch(`/api/attempts/${attemptIdRef.current}/violations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventId, returned: true }),
+      }).catch(() => undefined);
+    }
+  };
+
   // Palette summary counts
   const statusCounts = {
     notVisited: Object.values(state.statuses).filter(
@@ -730,7 +1026,7 @@ function ExamPageContent() {
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       // Enter on a focused button must only press that button, and the keys do nothing behind the dialog.
-      if (showSubmit || (e.target as HTMLElement)?.tagName === "BUTTON") return;
+      if (showSubmit || away || needsFullscreen || warningToShow !== null || (e.target as HTMLElement)?.tagName === "BUTTON") return;
       if (e.key === "ArrowRight") goNext();
       if (e.key === "ArrowLeft") goBack();
       if (e.key === "Enter") saveAndNext();
@@ -739,7 +1035,7 @@ function ExamPageContent() {
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.currentIndex, state.answers, state.statuses, showSubmit]);
+  }, [state.currentIndex, state.answers, state.statuses, showSubmit, away, warningToShow, needsFullscreen]);
 
   if (!fetching && (loadError || (exam && questions.length === 0))) {
     return (
@@ -780,6 +1076,20 @@ function ExamPageContent() {
   if (!currentQ) return null;
 
   return (
+    <>
+    {/* These sit outside the blurred page so they stay sharp and cover the whole screen. */}
+    {(away || finalWarning) && <AwayOverlay finalWarning={finalWarning} isPreview={isPreview} />}
+    {warningToShow !== null && !away && !finalWarning && (
+      <WarningDialog count={warningToShow} onClose={acknowledgeWarning} />
+    )}
+    {needsFullscreen && warningToShow === null && !away && !finalWarning && (
+      <FullscreenPrompt
+        onContinue={() => {
+          setNeedsFullscreen(false);
+          enterFullscreen();
+        }}
+      />
+    )}
     <div
       style={{
         height: "100vh",
@@ -787,6 +1097,8 @@ function ExamPageContent() {
         flexDirection: "column",
         background: "#f0f2f5",
         overflow: "hidden",
+        // The paper stays hidden until a warning is acknowledged.
+        filter: away || finalWarning || needsFullscreen || warningToShow !== null ? "blur(18px)" : undefined,
       }}
     >
       {/* ── Exam Header ── */}
@@ -1266,6 +1578,7 @@ function ExamPageContent() {
         />
       )}
     </div>
+    </>
   );
 }
 

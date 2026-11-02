@@ -86,7 +86,7 @@ export default function AdminSidebar({
   return (
     <aside
       suppressHydrationWarning
-      className={`fixed top-0 left-0 bottom-0 z-30 bg-white border-r border-gray-200 transition-all duration-300 flex flex-col ${
+      className={`fixed top-0 left-0 bottom-0 z-30 bg-white border-r border-gray-200 transition-all duration-300 flex flex-col print:hidden ${
         collapsed ? "w-20" : "w-64"
       }`}
       style={{ boxShadow: "1px 0 3px rgba(0,0,0,0.03)" }}

@@ -34,6 +34,20 @@ yarn-error.log*
 .env*
 !.env.example
 
+# database backups (contain student data and password hashes)
+/.backups/
+
+# exported student passwords
+ram_raj_student_passwords*.csv
+
+# real exam questions with correct answers: must never be public
+/scripts/parse-and-seed-questions.mjs
+
+# editors and logs
+.vscode/
+.idea/
+*.log
+
 # vercel
 .vercel
 

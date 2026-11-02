@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { MongoServerError, type Db, type Document, type Filter } from "mongodb";
 import { ApiError } from "./api";
 import { examWindow, getAvailability, getMarking, loadQuestions, questionForStudent } from "./exams";
+import { MAX_WARNINGS } from "./proctoring";
 import { scoreAttempt, type ScorableQuestion } from "./scoring";
 import type { SessionUser } from "./session";
 
@@ -89,6 +90,15 @@ export function parseAttemptState(attempt: Document, body: Record<string, any>) 
     }
     state.statuses = statuses;
   }
+  if (body.timeSpent && typeof body.timeSpent === "object") {
+    const timeSpent: Record<string, number> = {};
+    for (const [id, value] of Object.entries(body.timeSpent)) {
+      if (valid.has(id) && Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 86400) {
+        timeSpent[id] = value as number;
+      }
+    }
+    state.timeSpent = timeSpent;
+  }
   if (Number.isInteger(body.currentIndex) && body.currentIndex >= 0 && body.currentIndex < valid.size) {
     state.currentIndex = body.currentIndex;
   }
@@ -108,7 +118,44 @@ export async function saveAttemptState(db: Db, attempt: Document, state: Documen
   return result.matchedCount === 1;
 }
 
-export async function finalizeAttempt(db: Db, attempt: Document, submitType: "manual" | "time_up") {
+// Records one time away from the exam, and submits the exam on the final warning. The event ID
+// comes from the browser, so a retried request can't use up two of the student's warnings.
+export async function recordViolation(
+  db: Db,
+  attempt: Document,
+  eventId: string,
+  type: string,
+  state: Document
+) {
+  const current = await finalizeIfExpired(db, attempt);
+  if (current.status !== "in_progress") return current;
+
+  const updated = await db.collection("attempts").findOneAndUpdate(
+    { id: attempt.id, status: "in_progress", "violations.eventId": { $ne: eventId } },
+    {
+      $inc: { violationCount: 1 },
+      $push: { violations: { eventId, type, leftAt: new Date() } } as any,
+      $set: { ...state, lastSavedAt: new Date() },
+    },
+    { returnDocument: "after" }
+  );
+  const latest = updated ?? (await db.collection("attempts").findOne({ id: attempt.id }));
+  if (!latest) return current;
+
+  if (latest.status === "in_progress" && (latest.violationCount ?? 0) >= MAX_WARNINGS) {
+    return (await finalizeAttempt(db, latest, "violations")) ?? latest;
+  }
+  return latest;
+}
+
+export async function recordViolationReturn(db: Db, attemptId: string, eventId: string) {
+  await db.collection("attempts").updateOne(
+    { id: attemptId, violations: { $elemMatch: { eventId, returnedAt: { $exists: false } } } },
+    { $set: { "violations.$.returnedAt": new Date() } }
+  );
+}
+
+export async function finalizeAttempt(db: Db, attempt: Document, submitType: "manual" | "time_up" | "violations") {
   const questions = await loadQuestions(db, attempt.questionIds);
   const result = scoreAttempt(
     questions as unknown as ScorableQuestion[],
@@ -167,6 +214,8 @@ export async function attemptInProgressView(db: Db, attempt: Document) {
     serverNow: new Date(),
     answers: attempt.answers ?? {},
     statuses: attempt.statuses ?? {},
+    timeSpent: attempt.timeSpent ?? {},
+    violationCount: attempt.violationCount ?? 0,
     currentIndex: attempt.currentIndex ?? 0,
     questions: questions.map(questionForStudent),
   };
@@ -190,6 +239,7 @@ export async function attemptResultView(db: Db, attempt: Document) {
     startedAt: attempt.startedAt,
     submittedAt: attempt.submittedAt,
     submitType: attempt.submitType,
+    violationCount: attempt.violationCount ?? 0,
     marking: attempt.marking,
     result: attempt.result,
     rank: higher + 1,

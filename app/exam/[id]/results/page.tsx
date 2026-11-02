@@ -163,6 +163,11 @@ function ResultsContent() {
                 ⏰ Submitted automatically when time ran out
               </div>
             )}
+            {attempt.submitType === "violations" && (
+              <div style={{ fontSize: 12, opacity: 0.9, marginTop: 4 }}>
+                ⚠️ Submitted automatically after {attempt.violationCount} warnings for leaving the exam screen
+              </div>
+            )}
 
             <div style={{ marginTop: 20, display: "flex", gap: 16, flexWrap: "wrap" }}>
               <div

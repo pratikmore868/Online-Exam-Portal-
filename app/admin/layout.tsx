@@ -19,7 +19,7 @@ export default function AdminLayout({
 
         {/* Main Content Area */}
         <main
-          className={`flex-1 transition-all duration-300 min-h-screen flex flex-col ${
+          className={`flex-1 transition-all duration-300 min-h-screen flex flex-col print:ml-0 ${
             collapsed ? "ml-20" : "ml-64"
           }`}
         >
