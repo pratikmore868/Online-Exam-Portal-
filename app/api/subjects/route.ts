@@ -19,9 +19,16 @@ export async function GET() {
       countMap[c._id] = c.count;
     });
 
+    // Count the real questions rather than trusting the number stored on the subject.
+    const questionCounts = await db.collection("questions").aggregate([
+      { $group: { _id: "$subject", count: { $sum: 1 } } }
+    ]).toArray();
+    const questionCountMap = new Map(questionCounts.map((c) => [c._id, c.count]));
+
     const enriched = subjects.map(s => ({
       ...s,
-      chaptersCount: countMap[s.id] ?? s.chaptersCount ?? 0
+      chaptersCount: countMap[s.id] ?? s.chaptersCount ?? 0,
+      questionsCount: questionCountMap.get(s.name) ?? 0
     }));
 
     return NextResponse.json({ success: true, subjects: enriched });

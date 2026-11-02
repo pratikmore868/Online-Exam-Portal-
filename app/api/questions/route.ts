@@ -42,13 +42,23 @@ export async function GET(req: Request) {
     const questions = await db
       .collection("questions")
       .find(filter)
+      // Without a fixed order, pages could repeat or skip questions.
+      .sort({ chapter: 1, id: 1 })
+      // Numeric, so question 2 comes before question 10.
+      .collation({ locale: "en", numericOrdering: true })
       .skip((page - 1) * limit)
       .limit(limit)
       .toArray();
 
+    // Taken from the questions themselves, so the filter never offers a chapter with nothing in it.
+    const chapters = subject && subject !== "All" && subject !== "All Subjects"
+      ? (await db.collection("questions").distinct("chapter", { subject })).filter(Boolean).sort()
+      : undefined;
+
     return NextResponse.json({
       success: true,
       questions,
+      chapters,
       total,
       page,
       limit,
