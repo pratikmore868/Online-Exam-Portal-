@@ -23,6 +23,12 @@ export async function GET(
       throw new ApiError(409, "This student is still writing the exam.", "IN_PROGRESS");
     }
 
+    const cameraIncidents = await db
+      .collection("camera_incidents")
+      .find({ attemptId: attempt.id }, { projection: { _id: 0, type: 1, startedAt: 1, endedAt: 1, photoId: 1 } })
+      .sort({ startedAt: 1 })
+      .toArray();
+
     const [exam, questions, peers] = await Promise.all([
       findExam(db, attempt.examId),
       loadQuestions(db, attempt.questionIds),
@@ -39,7 +45,8 @@ export async function GET(
       questions: questions as any,
       attempt: attempt as any,
       peers: peers as any,
-      sections: exam?.sections,
+      // What this student actually saw, even if the exam's sections are changed later.
+      sections: attempt.sections ?? exam?.sections,
       usedSeconds: attempt.result?.timeTakenSeconds ?? 0,
       allowedSeconds,
     });
@@ -60,6 +67,12 @@ export async function GET(
           leftAt: v.leftAt,
           returnedAt: v.returnedAt ?? null,
         })),
+        camera: {
+          required: !!attempt.cameraRequired,
+          activeSeconds: attempt.cameraSeconds ?? 0,
+          detectorFailed: !!attempt.cameraDetectorFailed,
+          incidents: cameraIncidents,
+        },
         marking: attempt.marking,
         result: attempt.result,
         rank: scores.filter((s) => s > (attempt.result?.score ?? 0)).length + 1,

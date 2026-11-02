@@ -51,7 +51,7 @@ export async function GET(req: Request) {
         .find(filter, {
           projection: {
             id: 1, examId: 1, examTitle: 1, studentId: 1, studentName: 1, batch: 1,
-            submittedAt: 1, submitType: 1, result: 1, violationCount: 1,
+            submittedAt: 1, submitType: 1, result: 1, violationCount: 1, cameraIncidentCount: 1,
           },
         })
         .sort(sort)

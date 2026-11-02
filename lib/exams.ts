@@ -52,9 +52,14 @@ export function canStudentSee(exam: Document, batch?: string) {
   return LIVE_STATUSES.includes(exam.status) && (exam.batch === batch || exam.batch === "All Batches");
 }
 
+export function cameraRequiredFor(exam: Document, studentId: string) {
+  return !!exam.cameraProctoring && !(exam.cameraExemptions ?? []).includes(studentId);
+}
+
 // A whitelist, so fields added to exams later stay private unless they are listed here.
-export function examForStudent(exam: Document) {
+export function examForStudent(exam: Document, studentId: string) {
   return {
+    cameraRequired: cameraRequiredFor(exam, studentId),
     id: exam.id,
     title: exam.title,
     duration: exam.duration,
@@ -136,7 +141,27 @@ export function parseExamFields(body: Record<string, any>): Document {
   }
   if (body.batch !== undefined) fields.batch = String(body.batch);
   if (body.subject !== undefined) fields.subject = String(body.subject);
-  if (body.sections !== undefined) fields.sections = body.sections;
+  if (body.sections !== undefined) {
+    const valid =
+      Array.isArray(body.sections) &&
+      body.sections.every(
+        (s: any) =>
+          s &&
+          typeof s.name === "string" &&
+          s.name.length <= 80 &&
+          Array.isArray(s.questionIds) &&
+          s.questionIds.every((id: unknown) => typeof id === "string")
+      );
+    if (!valid) throw new ApiError(400, "Invalid sections.");
+    fields.sections = body.sections.map((s: any) => ({ name: s.name, questionIds: s.questionIds }));
+  }
+  if (body.cameraProctoring !== undefined) fields.cameraProctoring = body.cameraProctoring === true;
+  if (body.cameraExemptions !== undefined) {
+    if (!Array.isArray(body.cameraExemptions) || !body.cameraExemptions.every((id) => typeof id === "string")) {
+      throw new ApiError(400, "Camera exemptions must be a list of student IDs.");
+    }
+    fields.cameraExemptions = [...new Set(body.cameraExemptions.map((id: string) => id.trim().toUpperCase()).filter(Boolean))];
+  }
 
   for (const key of ["availableFrom", "availableUntil"]) {
     if (body[key] !== undefined) {

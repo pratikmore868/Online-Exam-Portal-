@@ -12,6 +12,7 @@ import {
   parseExamFields,
   publishProblems,
 } from "@/lib/exams";
+import { normalizeSections } from "@/lib/sections";
 
 export async function GET(
   req: Request,
@@ -39,7 +40,7 @@ export async function GET(
       return NextResponse.json({
         success: true,
         exam: {
-          ...examForStudent(exam),
+          ...examForStudent(exam, user.id),
           attempt: attempt ? { id: attempt.id, status: attempt.status } : null,
         },
       });
@@ -82,15 +83,23 @@ export async function PUT(
     const updateFields = parseExamFields(body);
 
     // Once anyone has started, changing the paper or marks would make results unfair between students.
-    if (updateFields.questions !== undefined || updateFields.marking !== undefined) {
+    if (updateFields.questions !== undefined || updateFields.marking !== undefined || updateFields.sections !== undefined) {
       const attemptCount = await db.collection("attempts").countDocuments({ examId: exam.id });
       if (attemptCount > 0) {
         throw new ApiError(
           409,
-          `${attemptCount} student(s) have already started this exam, so its questions and marking are locked.`,
+          `${attemptCount} student(s) have already started this exam, so its questions, sections and marking are locked.`,
           "EXAM_LOCKED"
         );
       }
+    }
+
+    // Keeps sections in step with the question list, so a removed question can't linger in one.
+    if (updateFields.questions !== undefined || updateFields.sections !== undefined) {
+      updateFields.sections = normalizeSections(
+        updateFields.sections ?? exam.sections ?? [],
+        updateFields.questions ?? exam.questions ?? []
+      );
     }
 
     if (updateFields.questions !== undefined || updateFields.marking !== undefined) {

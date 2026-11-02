@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { ChevronLeft, FileDown, Info, RotateCcw, TrendingUp } from "lucide-react";
 import { useAuth } from "@/app/components/AuthProvider";
-import { MAX_WARNINGS, VIOLATION_LABELS } from "@/lib/proctoring";
+import { CAMERA_INCIDENT_LABELS, CAMERA_PHOTO_RETENTION_DAYS, MAX_WARNINGS, VIOLATION_LABELS, type CameraIncidentType } from "@/lib/proctoring";
 import { markingLabel } from "@/lib/scoring";
 
 const OUTCOME_COLORS = {
@@ -20,7 +20,7 @@ const OUTCOME_LABELS: Record<string, string> = {
   unanswered: "Not Attempted",
 };
 
-const TABS = ["Score Card", "Overview", "Time Analysis", "Solution Details"];
+const TABS = ["Score Card", "Overview", "Time Analysis", "Solution Details", "Camera"];
 
 function formatLong(seconds: number) {
   const h = Math.floor(seconds / 3600);
@@ -469,6 +469,76 @@ function SolutionsTab({ data }: { data: any }) {
   );
 }
 
+function CameraTab({ data }: { data: any }) {
+  const { camera, result } = data.attempt;
+  if (!camera.required) {
+    return (
+      <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
+        <h3 className="text-sm font-semibold text-gray-800">Camera monitoring wasn&apos;t used for this attempt</h3>
+        <p className="text-sm text-gray-500 mt-1">It was off for this exam, or this student was exempt.</p>
+      </div>
+    );
+  }
+
+  const coverage = result.timeTakenSeconds > 0 ? Math.min(100, Math.round((camera.activeSeconds / result.timeTakenSeconds) * 100)) : 0;
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="text-xs text-gray-500 mb-1">Camera Flags</div>
+          <div className="text-xl font-bold text-gray-900">{camera.incidents.length}</div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="text-xs text-gray-500 mb-1">Camera Active</div>
+          <div className="text-xl font-bold text-gray-900">{coverage}% of the exam</div>
+          <div className="text-xs text-gray-500 mt-1">A low number can mean the camera was off or checks were blocked.</div>
+        </div>
+        <div className="bg-white rounded-xl border border-gray-200 p-4">
+          <div className="text-xs text-gray-500 mb-1">Automatic Checks</div>
+          <div className="text-xl font-bold text-gray-900">{camera.detectorFailed ? "Didn't run" : "Ran"}</div>
+          {camera.detectorFailed && <div className="text-xs text-red-700 mt-1">This device couldn&apos;t run them, so no flags were possible.</div>}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 p-3 text-xs text-gray-700 bg-amber-50 border border-amber-200 rounded-lg">
+        <Info className="w-4 h-4 text-amber-700 shrink-0" />
+        <span>Flags can be wrong, for example in poor light, or when a calculator looks like a phone. Please check the photo before acting. Photos are deleted after {CAMERA_PHOTO_RETENTION_DAYS} days.</span>
+      </div>
+
+      {camera.incidents.length === 0 ? (
+        <div className="bg-white rounded-xl border border-gray-200 p-10 text-center text-sm text-gray-500">No camera flags in this attempt.</div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {camera.incidents.map((incident: any) => {
+            const label = CAMERA_INCIDENT_LABELS[incident.type as CameraIncidentType] ?? incident.type;
+            const seconds = incident.endedAt
+              ? Math.max(0, Math.round((new Date(incident.endedAt).getTime() - new Date(incident.startedAt).getTime()) / 1000))
+              : null;
+            return (
+              <div key={`${incident.type}-${incident.startedAt}`} className="bg-white rounded-xl border border-gray-200 overflow-hidden break-inside-avoid">
+                {incident.photoId ? (
+                  // Served from an authenticated API route, which next/image can't optimise.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={`/api/camera-photos/${incident.photoId}`} alt={`Camera photo: ${label}`} loading="lazy" className="w-full aspect-[4/3] object-cover bg-gray-100" />
+                ) : (
+                  <div className="w-full aspect-[4/3] bg-gray-100 flex items-center justify-center text-xs text-gray-500">No photo</div>
+                )}
+                <div className="p-3">
+                  <div className="text-sm font-semibold text-gray-900">{label}</div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    {new Date(incident.startedAt).toLocaleTimeString("en-IN")}
+                    {seconds !== null ? ` • lasted ${seconds}s` : " • until the exam ended"}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ResultDetail() {
   const params = useParams();
   const router = useRouter();
@@ -599,7 +669,7 @@ function ResultDetail() {
             <div>ID: {attempt.studentId}</div>
           </div>
         </div>
-        <div role="tablist" className="grid grid-cols-2 md:grid-cols-4 gap-1 p-1 bg-gray-100 rounded-lg print:hidden">
+        <div role="tablist" className="grid grid-cols-2 md:grid-cols-5 gap-1 p-1 bg-gray-100 rounded-lg print:hidden">
           {TABS.map((name) => (
             <button
               key={name}
@@ -618,6 +688,7 @@ function ResultDetail() {
       {tab === "Overview" && <OverviewTab data={data} />}
       {tab === "Time Analysis" && <TimeTab data={data} />}
       {tab === "Solution Details" && <SolutionsTab data={data} />}
+      {tab === "Camera" && <CameraTab data={data} />}
     </div>
   );
 }

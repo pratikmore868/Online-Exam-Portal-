@@ -1,10 +1,13 @@
 "use client";
-import React, { useState, useEffect, Suspense } from "react";
+import React, { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter, useParams } from "next/navigation";
 import RamRajLogo from "../../../components/RamRajLogo";
 import { useAuth } from "../../../components/AuthProvider";
 import { MAX_WARNINGS } from "@/lib/proctoring";
 import { markingLabel } from "@/lib/scoring";
+import { CameraCheck } from "../CameraProctor";
+import { stopCamera } from "@/lib/cameraProctor";
+import { CAMERA_PHOTO_RETENTION_DAYS } from "@/lib/proctoring";
 
 function ExamInstructionsContent() {
   const router = useRouter();
@@ -17,6 +20,13 @@ function ExamInstructionsContent() {
   const [agreed, setAgreed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [startError, setStartError] = useState("");
+  const [cameraReady, setCameraReady] = useState(false);
+  const startedRef = useRef(false);
+
+  // Turn the camera off if the student leaves without starting. Starting keeps it on for the exam.
+  useEffect(() => () => {
+    if (!startedRef.current) stopCamera();
+  }, []);
 
   useEffect(() => {
     fetch(`/api/exams/${examId}`)
@@ -36,8 +46,11 @@ function ExamInstructionsContent() {
       .finally(() => setFetching(false));
   }, [examId, router]);
 
+  const cameraRequired = !!exam?.cameraRequired;
+  const canStart = agreed && (!cameraRequired || cameraReady);
+
   const handleStartExam = async () => {
-    if (!agreed) return;
+    if (!canStart) return;
     setLoading(true);
     setStartError("");
 
@@ -60,6 +73,7 @@ function ExamInstructionsContent() {
         if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined);
         return;
       }
+      startedRef.current = true;
       router.push(`/exam/${examId}`);
     } catch {
       setStartError("Could not reach the server. Please check your connection and try again.");
@@ -114,6 +128,9 @@ function ExamInstructionsContent() {
     "Marking scheme (correct / wrong): **" + marking + "**. " + (hasNegativeMarking ? "**Wrong answers lose marks.**" : "There is no negative marking.") + " Unanswered questions score zero.",
     "Assigned Student Batch: **" + batch + "**.",
     "Your answers are **saved automatically**. If your browser closes or your internet drops, log in again and you can continue where you stopped, but the timer does not pause.",
+    ...(cameraRequired
+      ? ["**Camera monitoring is on.** Keep your face in the frame, stay alone, and keep mobile phones out of sight. Flagged moments are recorded with a small photo for your teacher to review, and photos are deleted after " + CAMERA_PHOTO_RETENTION_DAYS + " days. They do not submit your exam automatically."]
+      : []),
     "You can attempt this exam **only once**.",
     "**Stay on the exam screen.** Each time you switch tabs, minimise the browser, move to another window or exit full screen, the paper is hidden, you get a warning, and it is recorded. **On warning " + MAX_WARNINGS + ", your exam is submitted automatically.**",
     "Read each question carefully before selecting an answer. You can navigate between questions using the question palette.",
@@ -435,6 +452,8 @@ function ExamInstructionsContent() {
             </label>
           </div>
 
+          {cameraRequired && <CameraCheck onReadyChange={setCameraReady} />}
+
           {startError && (
             <div role="alert" style={{ padding: "10px 14px", background: "#fee2e2", color: "#991b1b", borderRadius: 8, fontSize: 13, fontWeight: 500 }}>
               {startError}
@@ -444,7 +463,7 @@ function ExamInstructionsContent() {
           {/* Start Button */}
           <button
             id="start-exam-btn"
-            disabled={!agreed || loading}
+            disabled={!canStart || loading}
             onClick={handleStartExam}
             style={{
               width: "100%",
@@ -453,16 +472,16 @@ function ExamInstructionsContent() {
               fontWeight: 700,
               borderRadius: 10,
               border: "none",
-              cursor: agreed ? "pointer" : "not-allowed",
-              background: agreed
+              cursor: canStart ? "pointer" : "not-allowed",
+              background: canStart
                 ? "linear-gradient(135deg, #16a34a 0%, #15803d 100%)"
                 : "#d1d5db",
-              color: agreed ? "#ffffff" : "#9ca3af",
+              color: canStart ? "#ffffff" : "#9ca3af",
               transition: "all 0.2s",
-              boxShadow: agreed
+              boxShadow: canStart
                 ? "0 4px 16px rgba(22,163,74,0.35)"
                 : "none",
-              transform: agreed ? "translateY(0)" : "none",
+              transform: canStart ? "translateY(0)" : "none",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",

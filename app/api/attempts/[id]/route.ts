@@ -53,6 +53,9 @@ export async function DELETE(
     const result = await db.collection("attempts").deleteOne({ id });
     if (result.deletedCount === 0) throw new ApiError(404, "Attempt not found.");
 
+    await db.collection("camera_incidents").deleteMany({ attemptId: id });
+    await db.collection("camera_photos").deleteMany({ attemptId: id });
+
     return NextResponse.json({ success: true });
   } catch (error) {
     return handleApiError(error);

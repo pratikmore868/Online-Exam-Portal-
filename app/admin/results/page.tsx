@@ -122,7 +122,7 @@ export default function AdminResultsPage() {
       }
 
       const quote = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
-      const headers = ["Rank", "Student ID", "Student Name", "Batch", "Exam Title", "Score", "Max Score", "Percentage", "Percentile", "Accuracy", "Correct", "Wrong", "Unattempted", "Time Taken (min)", "Submitted", "Submission Type", "Warnings"];
+      const headers = ["Rank", "Student ID", "Student Name", "Batch", "Exam Title", "Score", "Max Score", "Percentage", "Percentile", "Accuracy", "Correct", "Wrong", "Unattempted", "Time Taken (min)", "Submitted", "Submission Type", "Warnings", "Camera Flags"];
       const rows = body.results.map((a: any) => [
         a.rank,
         a.studentId,
@@ -141,6 +141,7 @@ export default function AdminResultsPage() {
         new Date(a.submittedAt).toLocaleString("en-IN"),
         submitTypeLabel(a.submitType),
         a.violationCount ?? 0,
+        a.cameraIncidentCount ?? 0,
       ].map(quote).join(","));
 
       // The leading BOM makes Excel read Hindi and Marathi names correctly.
@@ -426,6 +427,9 @@ export default function AdminResultsPage() {
                     </span>
                     {att.violationCount > 0 && att.submitType !== "violations" && (
                       <div className="text-xs text-red-700 mt-1">⚠ {att.violationCount} warning{att.violationCount === 1 ? "" : "s"}</div>
+                    )}
+                    {att.cameraIncidentCount > 0 && (
+                      <div className="text-xs text-amber-800 mt-1">📷 {att.cameraIncidentCount} camera flag{att.cameraIncidentCount === 1 ? "" : "s"}</div>
                     )}
                   </td>
                   <td className="py-3.5 px-5 text-center">

@@ -27,6 +27,7 @@ interface Exam {
   subject: string;
   created: string;
   status: string;
+  cameraProctoring?: boolean;
   difficulty?: string;
   attempts?: number;
   avgScore?: number;
@@ -46,6 +47,7 @@ export default function AdminExaminationsPage() {
   const [newBatch, setNewBatch] = useState("12th JEE RRTS");
   const [newSubject, setNewSubject] = useState("Physics + Chemistry + Mathematics");
   const [newDuration, setNewDuration] = useState(180);
+  const [newCamera, setNewCamera] = useState(true);
   const [creating, setCreating] = useState(false);
 
   const batches = [
@@ -95,6 +97,7 @@ export default function AdminExaminationsPage() {
           batch: newBatch,
           subject: newSubject,
           duration: Number(newDuration),
+          cameraProctoring: newCamera,
           questions: []
         })
       });
@@ -227,6 +230,15 @@ export default function AdminExaminationsPage() {
                       Draft: students can&apos;t see this
                     </span>
                   )}
+                  <span
+                    className={`text-xs font-semibold px-2.5 py-0.5 rounded border ${
+                      exam.cameraProctoring
+                        ? "bg-amber-50 text-amber-800 border-amber-200"
+                        : "bg-gray-50 text-gray-500 border-gray-200"
+                    }`}
+                  >
+                    📷 Camera {exam.cameraProctoring ? "On" : "Off"}
+                  </span>
                   <span className="text-xs bg-blue-50 text-[#287FC1] font-semibold px-2.5 py-0.5 rounded border border-blue-100">
                     {exam.subject}
                   </span>
@@ -390,6 +402,18 @@ export default function AdminExaminationsPage() {
                   className="w-full text-xs px-3 py-2 border border-gray-300 rounded-lg"
                 />
               </div>
+
+              <label className="flex items-start gap-2 text-xs text-gray-800 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={newCamera}
+                  onChange={(e) => setNewCamera(e.target.checked)}
+                  className="mt-0.5 accent-[#287FC1]"
+                />
+                <span>
+                  <strong>Camera monitoring:</strong> students must allow their camera before starting, and flags are saved for review.
+                </span>
+              </label>
 
               <div className="flex items-center justify-end gap-2 pt-3 border-t border-gray-100">
                 <button

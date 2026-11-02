@@ -8,6 +8,7 @@ import {
   startAttempt,
 } from "@/lib/attempts";
 import { canStudentSee, findExam, loadQuestions, questionForStudent } from "@/lib/exams";
+import { orderedQuestionIds, resolveSections } from "@/lib/sections";
 
 async function respondWith(db: Awaited<ReturnType<typeof getDatabase>>, attempt: any) {
   return NextResponse.json({
@@ -34,7 +35,10 @@ export async function GET(
 
     // Staff preview: nothing is saved or scored.
     if (user.role !== "student") {
-      const questions = await loadQuestions(db, exam.questions ?? []);
+      const loaded = await loadQuestions(db, exam.questions ?? []);
+      const sections = resolveSections(loaded as any, exam.sections);
+      const byId = new Map(loaded.map((q) => [q.id, q]));
+      const questions = orderedQuestionIds(sections).map((id) => byId.get(id)!);
       return NextResponse.json({
         success: true,
         attempt: {
@@ -49,6 +53,7 @@ export async function GET(
           answers: {},
           statuses: {},
           currentIndex: 0,
+          sections,
           questions: questions.map(questionForStudent),
         },
       });

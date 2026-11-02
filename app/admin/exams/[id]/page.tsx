@@ -22,6 +22,13 @@ import {
   X
 } from "lucide-react";
 import ExamSettingsPanel from "./ExamSettingsPanel";
+import {
+  orderedQuestionIds,
+  placeQuestion,
+  removeQuestion,
+  sectionsForEditing,
+  type ExamSection,
+} from "@/lib/sections";
 
 interface Question {
   id: string;
@@ -105,7 +112,8 @@ function AdminExamEditorContent() {
         setExam(data.exam);
         setExamQuestions(data.exam.questionDocs || []);
         // Set default subject filter for Question Bank to match the exam
-        if (data.exam.subject && !data.exam.subject.includes("+")) {
+        // Only for a real subject: labels like "MHT-CET Combined" would filter the bank down to nothing.
+        if (["Physics", "Chemistry", "Mathematics", "Biology", "Foundation"].includes(data.exam.subject)) {
           setSubjectFilter(data.exam.subject);
         }
       }
@@ -184,11 +192,11 @@ function AdminExamEditorContent() {
 
   // Saves the question list and undoes the on-screen change if the server refuses,
   // e.g. because students have already started and the paper is locked.
-  const saveExamQuestions = async (updatedQuestions: string[], updatedDocs: Question[]) => {
+  const saveExamQuestions = async (updatedQuestions: string[], updatedDocs: Question[], updatedSections: ExamSection[]) => {
     const previous = { exam, examQuestions };
 
     // Optimistic UI update
-    setExam((prev) => prev ? { ...prev, questions: updatedQuestions, totalQuestions: updatedQuestions.length } : null);
+    setExam((prev) => prev ? { ...prev, questions: updatedQuestions, totalQuestions: updatedQuestions.length, sections: updatedSections } : null);
     setExamQuestions(updatedDocs);
 
     try {
@@ -196,7 +204,7 @@ function AdminExamEditorContent() {
       const res = await fetch(`/api/exams/${examId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ questions: updatedQuestions })
+        body: JSON.stringify({ questions: updatedQuestions, sections: updatedSections })
       });
       const data = await res.json();
       if (!data.success) {
@@ -207,17 +215,59 @@ function AdminExamEditorContent() {
       console.error("Failed to update exam questions:", err);
       setExam(previous.exam);
       setExamQuestions(previous.examQuestions);
+      setActiveSection("all");
       alert(err instanceof Error ? err.message : "Could not save the change.");
     } finally {
       setSaving(false);
     }
   };
 
-  // Add question to exam
+  // The current section setup, including questions that are grouped by subject automatically.
+  const editorSections = useMemo(
+    () => sectionsForEditing(examQuestions, exam?.sections),
+    [examQuestions, exam?.sections]
+  );
+
+  // The paper's real order, so numbers here match what students see.
+  const orderedExamQuestions = useMemo(() => {
+    const byId = new Map(examQuestions.map((q) => [q.id, q]));
+    return orderedQuestionIds(editorSections).map((id) => byId.get(id)).filter((q): q is Question => !!q);
+  }, [examQuestions, editorSections]);
+
+  const visibleQuestions = useMemo(() => {
+    const section = editorSections.find((s) => s.name === activeSection);
+    if (!section) return orderedExamQuestions;
+    return orderedExamQuestions.filter((q) => section.questionIds.includes(q.id));
+  }, [orderedExamQuestions, editorSections, activeSection]);
+
+  const activeSectionExists = editorSections.some((s) => s.name === activeSection);
+
+  // Add question to exam: into the open section, otherwise into its subject's section
   const handleAddQuestionToExam = async (q: Question) => {
     if (!exam) return;
     if (examQuestionIdSet.has(q.id)) return;
-    await saveExamQuestions([...(exam.questions || []), q.id], [...examQuestions, q]);
+    await saveExamQuestions(
+      [...(exam.questions || []), q.id],
+      [...examQuestions, q],
+      placeQuestion(editorSections, q, activeSectionExists ? activeSection : undefined)
+    );
+  };
+
+  const handleMoveQuestion = async (q: Question, sectionName: string) => {
+    if (!exam) return;
+    await saveExamQuestions(exam.questions || [], examQuestions, placeQuestion(editorSections, q, sectionName));
+  };
+
+  // Its questions aren't removed from the exam: they go back to their subject sections.
+  const handleDeleteSection = async (sectionName: string) => {
+    if (!exam) return;
+    if (!confirm(`Delete the section "${sectionName}"? Its questions stay in the exam and go back to their subject sections.`)) return;
+    setActiveSection("all");
+    await saveExamQuestions(
+      exam.questions || [],
+      examQuestions,
+      editorSections.filter((s) => s.name !== sectionName)
+    );
   };
 
   // Remove question from exam
@@ -225,7 +275,8 @@ function AdminExamEditorContent() {
     if (!exam) return;
     await saveExamQuestions(
       (exam.questions || []).filter((id) => id !== qId),
-      examQuestions.filter((q) => q.id !== qId)
+      examQuestions.filter((q) => q.id !== qId),
+      removeQuestion(editorSections, qId)
     );
   };
 
@@ -385,7 +436,7 @@ function AdminExamEditorContent() {
       </div>
 
       {/* ── SECTION BAR ── */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 flex-wrap">
         <button
           onClick={() => setActiveSection("all")}
           className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors shadow-xs ${
@@ -397,10 +448,9 @@ function AdminExamEditorContent() {
           All Questions ({examQuestions.length})
         </button>
 
-        {exam.sections &&
-          exam.sections.map((sec, idx) => (
+        {editorSections.map((sec) => (
+          <span key={sec.name} className="inline-flex items-center">
             <button
-              key={idx}
               onClick={() => setActiveSection(sec.name)}
               className={`px-4 py-2 rounded-lg text-xs font-semibold transition-colors shadow-xs ${
                 activeSection === sec.name
@@ -408,9 +458,22 @@ function AdminExamEditorContent() {
                   : "bg-white text-gray-700 border border-gray-200 hover:bg-gray-50"
               }`}
             >
-              {sec.name} ({sec.questionIds?.length || 0})
+              {sec.name} ({sec.questionIds.length})
             </button>
-          ))}
+            {/* A section holding only its own subject's questions would just come back, so it can't be deleted. */}
+            {activeSection === sec.name &&
+              !(sec.questionIds.length > 0 && examQuestions.every((q) => !sec.questionIds.includes(q.id) || q.subject === sec.name)) && (
+              <button
+                onClick={() => handleDeleteSection(sec.name)}
+                title={`Delete section ${sec.name}`}
+                aria-label={`Delete section ${sec.name}`}
+                className="ml-1 p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </span>
+        ))}
 
         <button
           onClick={() => setShowAddSectionModal(true)}
@@ -429,10 +492,12 @@ function AdminExamEditorContent() {
           <div className="flex items-center justify-between pb-4 border-b border-gray-100 mb-4">
             <div>
               <h2 className="text-lg font-bold text-gray-900 tracking-tight">
-                Exam Questions
+                {activeSectionExists ? activeSection : "Exam Questions"}
               </h2>
               <p className="text-xs text-gray-500 mt-0.5">
-                {examQuestions.length} questions in this exam
+                {activeSectionExists
+                  ? `${visibleQuestions.length} of ${examQuestions.length} questions. New questions go into this section.`
+                  : `${examQuestions.length} questions in this exam. New questions go into their subject's section.`}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -444,7 +509,7 @@ function AdminExamEditorContent() {
 
           {/* Questions List */}
           <div className="space-y-4 overflow-y-auto max-h-[900px] pr-1">
-            {examQuestions.length === 0 ? (
+            {visibleQuestions.length === 0 ? (
               <div className="p-12 text-center text-gray-400">
                 <FileText className="w-10 h-10 mx-auto mb-2 text-gray-300" />
                 <p className="text-sm font-medium">No questions added yet.</p>
@@ -453,16 +518,16 @@ function AdminExamEditorContent() {
                 </p>
               </div>
             ) : (
-              examQuestions.map((q, idx) => (
+              visibleQuestions.map((q) => (
                 <div
-                  key={q.id || idx}
+                  key={q.id}
                   className="p-4 rounded-xl border border-gray-200 hover:border-gray-300 transition-colors bg-white group shadow-2xs relative"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1">
                       <div className="flex items-baseline gap-2">
                         <span className="text-sm font-bold text-gray-900">
-                          {idx + 1}.
+                          {orderedExamQuestions.indexOf(q) + 1}.
                         </span>
                         <p className="text-sm text-gray-800 leading-relaxed font-medium">
                           {q.text}
@@ -515,6 +580,19 @@ function AdminExamEditorContent() {
                             {q.chapter}
                           </span>
                         )}
+                        <label className="text-[11px] font-medium text-gray-600 flex items-center gap-1">
+                          Section:
+                          <select
+                            aria-label={`Section for question ${orderedExamQuestions.indexOf(q) + 1}`}
+                            value={editorSections.find((s) => s.questionIds.includes(q.id))?.name ?? ""}
+                            onChange={(e) => handleMoveQuestion(q, e.target.value)}
+                            className="text-[11px] border border-gray-300 rounded-md px-1 py-0.5 bg-white"
+                          >
+                            {editorSections.map((s) => (
+                              <option key={s.name} value={s.name}>{s.name}</option>
+                            ))}
+                          </select>
+                        </label>
                       </div>
                     </div>
 
@@ -866,18 +944,15 @@ function AdminExamEditorContent() {
               <button
                 onClick={async () => {
                   if (!newSectionName.trim() || !exam) return;
-                  const updatedSections = [
-                    ...(exam.sections || []),
-                    { name: newSectionName.trim(), questionIds: [] }
-                  ];
-                  setExam({ ...exam, sections: updatedSections });
+                  const name = newSectionName.trim();
                   setShowAddSectionModal(false);
                   setNewSectionName("");
-                  await fetch(`/api/exams/${examId}`, {
-                    method: "PUT",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ sections: updatedSections })
-                  });
+                  if (editorSections.some((s) => s.name.toLowerCase() === name.toLowerCase())) {
+                    setActiveSection(editorSections.find((s) => s.name.toLowerCase() === name.toLowerCase())!.name);
+                    return;
+                  }
+                  setActiveSection(name);
+                  await saveExamQuestions(exam.questions || [], examQuestions, [...editorSections, { name, questionIds: [] }]);
                 }}
                 className="px-4 py-1.5 text-xs font-semibold text-white bg-[#287FC1] hover:bg-[#1a5f94] rounded-lg shadow-xs"
               >

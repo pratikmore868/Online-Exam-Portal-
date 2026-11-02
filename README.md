@@ -62,11 +62,30 @@ You need Node.js 22 or later and a MongoDB database.
 3. A student gets one attempt. Answers autosave, and the timer keeps running if they close the browser.
 4. The server scores the attempt on submit, at the deadline, on the 3rd warning, or, for an abandoned attempt, the next time results are read.
 
+### Sections
+
+Questions go into a section named after their subject automatically, or into whichever section is open in the exam editor, and each question can be moved to another section. Students see the sections as tabs and sit the paper section by section, with question numbers running through the whole exam. Sections lock once any student has started.
+
 ### Warnings
 
 Switching tabs, moving to another window or exiting full screen hides the paper and gives the student a warning. The warning button also returns them to full screen, because browsers only allow that after a click or key press. Each warning is recorded and shown to staff on the student's details page.
 
 These checks run in the browser, so they discourage cheating but can't prevent it entirely, and something like a notification can occasionally trigger a warning. Staff can review each warning, and an admin can allow a retake.
+
+### Camera monitoring
+
+Staff can turn this on per exam in the exam's settings. Students then pass a camera check before starting, and during the exam the portal flags:
+
+- no face in the camera for 5 seconds
+- more than one face for 3 seconds
+- a possible mobile phone that is clearly visible
+- the camera being turned off, which also hides the paper
+
+After a full minute with no face, a large popup also appears. It doesn't count toward the 3 warnings.
+
+The video is analysed on the student's device with [MediaPipe](https://ai.google.dev/edge/mediapipe) and isn't uploaded. Each flag saves one small photo for staff, shown in the **Camera** tab of the student's result, and photos are deleted automatically after 60 days. Flags never submit an exam, because detection can be wrong. A phone kept out of the camera's view can't be detected.
+
+Browsers only allow camera access on HTTPS or `localhost`. Filming students, especially minors, may need parental consent, so please confirm this before turning it on. A student whose camera doesn't work can be exempted in the exam's settings.
 
 ## Scripts
 

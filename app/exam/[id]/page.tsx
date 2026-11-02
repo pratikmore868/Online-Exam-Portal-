@@ -4,6 +4,7 @@ import { useRouter, useParams } from "next/navigation";
 import RamRajLogo from "../../components/RamRajLogo";
 import { useAuth } from "../../components/AuthProvider";
 import { MAX_WARNINGS } from "@/lib/proctoring";
+import { CameraAlert, CameraBlockedOverlay, CameraPreview, LongAbsenceDialog, useCameraProctor } from "./CameraProctor";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 type QuestionStatus =
@@ -503,6 +504,8 @@ function ExamPageContent() {
   // incident that fires several browser events can't use up more than one warning.
   const currentEventRef = useRef<string | null>(null);
   const isPreview = exam?.preview === true;
+  const cameraEnabled = !!exam?.cameraRequired && !isPreview && !state.submitted;
+  const camera = useCameraProctor(exam?.id ?? null, cameraEnabled);
 
   const stateRef = useRef(state);
   const dirtyRef = useRef(false);
@@ -1026,7 +1029,7 @@ function ExamPageContent() {
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       // Enter on a focused button must only press that button, and the keys do nothing behind the dialog.
-      if (showSubmit || away || needsFullscreen || warningToShow !== null || (e.target as HTMLElement)?.tagName === "BUTTON") return;
+      if (showSubmit || away || needsFullscreen || camera.longAbsence || warningToShow !== null || (e.target as HTMLElement)?.tagName === "BUTTON") return;
       if (e.key === "ArrowRight") goNext();
       if (e.key === "ArrowLeft") goBack();
       if (e.key === "Enter") saveAndNext();
@@ -1035,7 +1038,7 @@ function ExamPageContent() {
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.currentIndex, state.answers, state.statuses, showSubmit, away, warningToShow, needsFullscreen]);
+  }, [state.currentIndex, state.answers, state.statuses, showSubmit, away, warningToShow, needsFullscreen, camera.longAbsence]);
 
   if (!fetching && (loadError || (exam && questions.length === 0))) {
     return (
@@ -1075,12 +1078,27 @@ function ExamPageContent() {
 
   if (!currentQ) return null;
 
+  const sections: { name: string; questionIds: string[] }[] = exam?.sections ?? [];
+  const currentSection = sections.find((s) => s.questionIds.includes(currentQ.id));
+
   return (
     <>
     {/* These sit outside the blurred page so they stay sharp and cover the whole screen. */}
     {(away || finalWarning) && <AwayOverlay finalWarning={finalWarning} isPreview={isPreview} />}
     {warningToShow !== null && !away && !finalWarning && (
       <WarningDialog count={warningToShow} onClose={acknowledgeWarning} />
+    )}
+    {cameraEnabled && <CameraAlert types={camera.activeTypes} />}
+    {cameraEnabled && camera.longAbsence && !away && !finalWarning && warningToShow === null && !camera.blocked && !needsFullscreen && (
+      <LongAbsenceDialog onClose={camera.dismissLongAbsence} />
+    )}
+    {camera.blocked && !away && !finalWarning && warningToShow === null && !needsFullscreen && (
+      <CameraBlockedOverlay
+        error={camera.cameraError}
+        canContinue={camera.canContinueWithoutCamera}
+        onRetry={camera.retryCamera}
+        onContinue={camera.continueWithoutCamera}
+      />
     )}
     {needsFullscreen && warningToShow === null && !away && !finalWarning && (
       <FullscreenPrompt
@@ -1098,7 +1116,7 @@ function ExamPageContent() {
         background: "#f0f2f5",
         overflow: "hidden",
         // The paper stays hidden until a warning is acknowledged.
-        filter: away || finalWarning || needsFullscreen || warningToShow !== null ? "blur(18px)" : undefined,
+        filter: away || finalWarning || needsFullscreen || camera.blocked || (cameraEnabled && camera.longAbsence) || warningToShow !== null ? "blur(18px)" : undefined,
       }}
     >
       {/* ── Exam Header ── */}
@@ -1176,6 +1194,50 @@ function ExamPageContent() {
             Batch: {exam.batch}
           </span>
         )}
+      </div>
+
+      {/* ── Section tabs ── */}
+      <div
+        role="tablist"
+        aria-label="Exam sections"
+        style={{
+          display: "flex",
+          gap: 6,
+          padding: "8px 20px",
+          background: "#ffffff",
+          borderBottom: "1px solid #e5e7eb",
+          overflowX: "auto",
+          flexShrink: 0,
+        }}
+      >
+        {sections.map((section) => {
+          const isActive = section === currentSection;
+          const answered = section.questionIds.filter((id) => state.answers[id] !== undefined).length;
+          return (
+            <button
+              key={section.name}
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => goToQuestion(questions.findIndex((q) => q.id === section.questionIds[0]))}
+              style={{
+                padding: "7px 16px",
+                borderRadius: 8,
+                border: isActive ? "1px solid #287FC1" : "1px solid #d1d5db",
+                background: isActive ? "#287FC1" : "#ffffff",
+                color: isActive ? "#ffffff" : "#374151",
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {section.name}{" "}
+              <span style={{ fontWeight: 500, opacity: 0.85 }}>
+                ({answered}/{section.questionIds.length})
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       {/* ── Main Content ── */}
@@ -1519,10 +1581,10 @@ function ExamPageContent() {
                 letterSpacing: "0.5px",
               }}
             >
-              Navigate Questions
+              {currentSection ? `${currentSection.name} Questions` : "Navigate Questions"}
             </div>
             <div className="palette-grid">
-              {questions.map((q, idx) => (
+              {questions.map((q, idx) => currentSection && !currentSection.questionIds.includes(q.id) ? null : (
                 <PaletteBtn
                   key={q.id}
                   num={idx + 1}
@@ -1533,6 +1595,8 @@ function ExamPageContent() {
               ))}
             </div>
           </div>
+
+          {cameraEnabled && <CameraPreview videoCallback={camera.videoCallback} />}
 
           {/* Submit button in sidebar */}
           <div

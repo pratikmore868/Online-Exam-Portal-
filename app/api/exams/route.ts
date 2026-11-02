@@ -4,6 +4,7 @@ import { finalizeExpired } from "@/lib/attempts";
 import { ApiError, handleApiError, readJson, requireStaff, requireUser } from "@/lib/api";
 import { computeTotalMarks, examForStudent, LIVE_STATUSES, parseExamFields } from "@/lib/exams";
 import { DEFAULT_MARKING } from "@/lib/scoring";
+import { normalizeSections } from "@/lib/sections";
 
 // Exam dates created before createdAt existed are text like "Oct 24, 2026", which sorts alphabetically.
 function createdTime(exam: any) {
@@ -37,7 +38,7 @@ export async function GET(req: Request) {
           .map((exam) => {
             const attempt = attemptByExam.get(exam.id);
             return {
-              ...examForStudent(exam),
+              ...examForStudent(exam, user.id),
               attempt: attempt
                 ? {
                     id: attempt.id,
@@ -131,10 +132,11 @@ export async function POST(req: Request) {
       difficulty: body.difficulty || "Hard",
       description: body.description || `${fields.title} assessment for batch ${batch}`,
       questions,
-      sections: fields.sections || [
-        { name: "Section A", questionIds: questions }
-      ],
+      // Empty by default: questions then group into sections by subject.
+      sections: normalizeSections(fields.sections ?? [], questions),
       marking,
+      cameraProctoring: fields.cameraProctoring ?? false,
+      cameraExemptions: fields.cameraExemptions ?? [],
       availableFrom: fields.availableFrom ?? null,
       availableUntil: fields.availableUntil ?? null,
     };

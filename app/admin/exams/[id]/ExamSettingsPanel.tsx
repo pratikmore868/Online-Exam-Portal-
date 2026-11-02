@@ -50,6 +50,9 @@ export default function ExamSettingsPanel({ exam, subjects, onExamUpdated }: Pro
     return result;
   });
 
+  const [cameraProctoring, setCameraProctoring] = useState<boolean>(!!exam.cameraProctoring);
+  const [cameraExemptions, setCameraExemptions] = useState<string>((exam.cameraExemptions ?? []).join(", "));
+
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string; problems?: string[] } | null>(null);
 
@@ -70,6 +73,34 @@ export default function ExamSettingsPanel({ exam, subjects, onExamUpdated }: Pro
     return marking;
   };
 
+  // Saved as soon as it's clicked, because an unsaved tick looks on but does nothing.
+  const toggleCamera = async (checked: boolean) => {
+    setCameraProctoring(checked);
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/exams/${exam.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cameraProctoring: checked }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+      onExamUpdated(data.exam);
+      setMessage({
+        tone: "ok",
+        text: checked
+          ? "Camera monitoring is on. Students will see the camera check before starting. Anyone already writing isn't affected."
+          : "Camera monitoring is off for students who haven't started.",
+      });
+    } catch (err) {
+      setCameraProctoring(!checked);
+      setMessage({ tone: "error", text: err instanceof Error && err.message ? err.message : "Could not save the camera setting." });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const save = async (extra: Record<string, unknown> = {}) => {
     setBusy(true);
     setMessage(null);
@@ -78,6 +109,8 @@ export default function ExamSettingsPanel({ exam, subjects, onExamUpdated }: Pro
         duration: Number(duration),
         availableFrom: fromLocalInput(availableFrom),
         availableUntil: fromLocalInput(availableUntil),
+        cameraProctoring,
+        cameraExemptions: cameraExemptions.split(/[\s,]+/).filter(Boolean),
         ...extra,
       };
       if (!locked) body.marking = buildMarking();
@@ -188,6 +221,36 @@ export default function ExamSettingsPanel({ exam, subjects, onExamUpdated }: Pro
           <input id="exam-until" type="datetime-local" value={availableUntil} onChange={(e) => setAvailableUntil(e.target.value)} className={inputClass} />
           <p className="text-[11px] text-gray-400 mt-1">Everyone must finish by this time, even if they started late.</p>
         </div>
+      </div>
+
+      <div className="space-y-2 pb-1">
+        <label className="flex items-start gap-2 text-xs text-gray-800 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={cameraProctoring}
+            disabled={busy}
+            onChange={(e) => toggleCamera(e.target.checked)}
+            className="mt-0.5 accent-[#287FC1]"
+          />
+          <span>
+            <strong>Camera monitoring:</strong> requires the student&apos;s camera, and flags no face, more than one face and a possible mobile phone. Flags are for review and never submit the exam. This saves as soon as you click it. Students already writing aren&apos;t affected.
+            <span className="block text-amber-700 mt-0.5">Filming students, especially minors, may need parental consent. Please confirm this first.</span>
+          </span>
+        </label>
+        {cameraProctoring && (
+          <div className="md:max-w-md">
+            <label htmlFor="camera-exemptions" className={labelClass}>Students exempt from the camera (IDs, comma separated)</label>
+            <input
+              id="camera-exemptions"
+              type="text"
+              placeholder="e.g. RR20268084, RR20258650"
+              value={cameraExemptions}
+              onChange={(e) => setCameraExemptions(e.target.value)}
+              className={inputClass}
+            />
+            <p className="text-[11px] text-gray-400 mt-1">For a student whose camera doesn&apos;t work. Click Save Settings, then they can start.</p>
+          </div>
+        )}
       </div>
 
       <div className="space-y-2">

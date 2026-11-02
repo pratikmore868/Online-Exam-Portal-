@@ -2,9 +2,10 @@ import "server-only";
 import { randomUUID } from "node:crypto";
 import { MongoServerError, type Db, type Document, type Filter } from "mongodb";
 import { ApiError } from "./api";
-import { examWindow, getAvailability, getMarking, loadQuestions, questionForStudent } from "./exams";
+import { cameraRequiredFor, examWindow, getAvailability, getMarking, loadQuestions, questionForStudent } from "./exams";
 import { MAX_WARNINGS } from "./proctoring";
 import { scoreAttempt, type ScorableQuestion } from "./scoring";
+import { orderedQuestionIds, resolveSections } from "./sections";
 import type { SessionUser } from "./session";
 
 // Answers already on their way when the clock hits zero are still accepted for this long.
@@ -31,6 +32,9 @@ export async function startAttempt(db: Db, exam: Document, student: SessionUser)
     throw new ApiError(409, "This exam is not ready yet. Please contact your teacher.", "NOT_READY");
   }
 
+  // The paper runs section by section, so Physics questions stay together.
+  const sections = resolveSections(questions as any, exam.sections);
+
   const now = new Date();
   const { until } = examWindow(exam);
   const fullEnd = now.getTime() + Number(exam.duration) * 60_000;
@@ -46,7 +50,9 @@ export async function startAttempt(db: Db, exam: Document, student: SessionUser)
     startedAt: now,
     endsAt: new Date(until ? Math.min(fullEnd, until.getTime()) : fullEnd),
     // Copied now so that editing the exam later cannot change what this student is marked on.
-    questionIds,
+    questionIds: orderedQuestionIds(sections),
+    sections,
+    cameraRequired: cameraRequiredFor(exam, student.id),
     marking: getMarking(exam),
     answers: {},
     statuses: {},
@@ -216,7 +222,10 @@ export async function attemptInProgressView(db: Db, attempt: Document) {
     statuses: attempt.statuses ?? {},
     timeSpent: attempt.timeSpent ?? {},
     violationCount: attempt.violationCount ?? 0,
+    cameraRequired: !!attempt.cameraRequired,
     currentIndex: attempt.currentIndex ?? 0,
+    // Attempts started before sections existed group by subject without changing their question order.
+    sections: attempt.sections ?? resolveSections(questions as any),
     questions: questions.map(questionForStudent),
   };
 }

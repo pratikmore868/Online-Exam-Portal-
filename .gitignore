@@ -43,6 +43,9 @@ ram_raj_student_passwords*.csv
 # real exam questions with correct answers: must never be public
 /scripts/parse-and-seed-questions.mjs
 
+# copied from node_modules by scripts/copy-mediapipe.mjs
+/public/mediapipe/wasm/
+
 # editors and logs
 .vscode/
 .idea/
