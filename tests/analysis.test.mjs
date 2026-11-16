@@ -78,3 +78,24 @@ test("insights are drawn from the data", () => {
   assert.ok(high.insights.strengths.some((s) => s.includes("High accuracy")));
   assert.equal(high.insights.improvements.length, 0);
 });
+
+test("each question shows how the class did, and each group shows class average and top score", () => {
+  const attempt = { answers: { p1: 0, p2: 0 }, marking };
+  const peer = { answers: { p1: 0, p2: 1, m1: 2 }, marking };
+  const blank = { answers: {}, marking };
+  const a = analyzeAttempt({ questions, attempt, peers: [attempt, peer, blank] });
+
+  const byId = Object.fromEntries(a.questions.map((q) => [q.id, q]));
+  assert.equal(byId.p1.globalAttempt, 67); // 2 of 3 answered
+  assert.equal(byId.p1.globalAccuracy, 100); // both right
+  assert.equal(byId.p2.globalAccuracy, 50); // 1 of 2 right
+  assert.equal(byId.m1.globalAttempt, 33);
+
+  const physics = a.subjects.find((s) => s.name === "Physics");
+  assert.equal(physics.topScore, 8);
+  assert.equal(physics.classAverage, 3.7); // (3 + 8 + 0) / 3
+
+  const lonely = analyzeAttempt({ questions, attempt, peers: [] });
+  assert.equal(lonely.questions[0].globalAttempt, 0);
+  assert.equal(lonely.questions[0].globalAccuracy, 0);
+});

@@ -26,6 +26,8 @@ export interface GroupRow {
   total: number;
   accuracy: number;
   percentile: number;
+  classAverage: number;
+  topScore: number;
 }
 
 export type Outcome = "correct" | "incorrect" | "unanswered";
@@ -86,6 +88,8 @@ function buildGroups(
       total: own.total,
       accuracy: accuracyOf(own.correct, own.incorrect),
       percentile: percentileOf(own.score, peerScores),
+      classAverage: peerScores.length > 0 ? round1(peerScores.reduce((a, b) => a + b, 0) / peerScores.length) : 0,
+      topScore: peerScores.length > 0 ? Math.max(...peerScores) : 0,
     };
   });
 }
@@ -163,6 +167,10 @@ export function analyzeAttempt(input: {
     const choice = attempt.answers?.[q.id];
     const outcome = answerOutcome(q, choice);
     const marks = marksFor(q, attempt.marking);
+    // How the whole class did on this question: share who answered it, and share of those who got it right.
+    const peerOutcomes = peers.map((p) => answerOutcome(q, p.answers?.[q.id]));
+    const peerAttempted = peerOutcomes.filter((o) => o !== "unanswered").length;
+    const peerCorrect = peerOutcomes.filter((o) => o === "correct").length;
     return {
       id: q.id,
       number: i + 1,
@@ -181,6 +189,8 @@ export function analyzeAttempt(input: {
       marksPossible: marks.correct,
       timeSeconds: timeTracked ? (timeSpent[q.id] ?? 0) : null,
       explanation: q.explanation ?? q.solution ?? null,
+      globalAttempt: peers.length > 0 ? Math.round((peerAttempted / peers.length) * 100) : 0,
+      globalAccuracy: peerAttempted > 0 ? Math.round((peerCorrect / peerAttempted) * 100) : 0,
     };
   });
 
